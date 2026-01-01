@@ -1,0 +1,7 @@
+{
+  "name": "ProShots",
+  "description": "Professional AI photo enhancement and generation for headshots, dating, and vacation photos.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
