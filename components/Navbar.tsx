@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Camera, ChevronDown, Wand2, Maximize, Layers, Frame, Menu, X } from 'lucide-react';
+import { Camera, ChevronDown, Wand2, Maximize, Layers, Frame, Menu, X, User } from 'lucide-react';
 import { AppStep, ToolType } from '../types';
 
 interface NavbarProps {
@@ -114,6 +115,13 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
           >
             Success Stories
           </a>
+
+          <button 
+            onClick={() => onStepChange(AppStep.FOUNDER)}
+            className={`flex items-center gap-2 hover:text-slate-900 transition-colors ${currentStep === AppStep.FOUNDER ? 'text-slate-900 font-black' : ''}`}
+          >
+            Creator
+          </button>
           
           <button 
             onClick={handleStartClick}
@@ -142,6 +150,13 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
           >
             How it Works
           </a>
+
+          <button 
+            onClick={() => { onStepChange(AppStep.FOUNDER); setIsMobileMenuOpen(false); }}
+            className="text-lg font-bold text-slate-900 border-b border-slate-50 pb-2 text-left"
+          >
+            Creator
+          </button>
           
           <div className="space-y-4">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Tools</span>

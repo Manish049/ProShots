@@ -5,7 +5,8 @@ export enum AppStep {
   STYLE_SELECT = 'style_select',
   PROCESSING = 'processing',
   RESULTS = 'results',
-  TOOLS = 'tools'
+  TOOLS = 'tools',
+  FOUNDER = 'founder'
 }
 
 export enum ToolType {

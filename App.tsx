@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
@@ -7,6 +8,7 @@ import StyleSelector from './components/StyleSelector';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultGallery from './components/ResultGallery';
 import ToolsHub from './components/ToolsHub';
+import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
@@ -185,6 +187,8 @@ const App: React.FC = () => {
         return <ResultGallery images={results} onRestart={() => setStep(AppStep.LANDING)} />;
       case AppStep.TOOLS:
         return <ToolsHub initialTool={activeTool} />;
+      case AppStep.FOUNDER:
+        return <FounderPage />;
       default:
         return <Hero onStart={() => setStep(AppStep.UPLOAD)} />;
     }
