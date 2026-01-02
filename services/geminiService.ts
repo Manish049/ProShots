@@ -4,9 +4,9 @@ import { UserAnalysis, PhotoStyle, GeneratedImage, ToolType } from "../types";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper to get the most up-to-date API key
+// Helper to get the most up-to-date API key exclusively from process.env.API_KEY
 const getActiveApiKey = () => {
-  return localStorage.getItem('proshots_manual_key') || process.env.API_KEY;
+  return process.env.API_KEY;
 };
 
 export class QuotaExceededError extends Error {
@@ -30,13 +30,14 @@ export class AuthError extends Error {
   }
 }
 
+// Create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
 async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = 3): Promise<T> {
   let lastError: any;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const apiKey = getActiveApiKey();
       if (!apiKey) {
-        throw new AuthError("API Key is missing. Please enter your key in the Neural Console.");
+        throw new AuthError("API Key is missing. Please select your API key.");
       }
       
       const ai = new GoogleGenAI({ apiKey });
@@ -96,6 +97,7 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
       return { inlineData: { data, mimeType } };
     });
 
+    // Use gemini-3-pro-preview for complex reasoning tasks
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: {
@@ -137,6 +139,7 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
         }
       }
     });
+    // Extracting text output directly from GenerateContentResponse
     return JSON.parse(response.text || "{}");
   });
 };
@@ -178,6 +181,7 @@ export const generateEnhancedPhoto = async (
     Required style: ${stylePrompt}.
     Output ONLY the image part.`;
 
+    // Generate images using gemini-2.5-flash-image
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
@@ -189,6 +193,7 @@ export const generateEnhancedPhoto = async (
     });
 
     let imageUrl = "";
+    // Iterating through all parts to find the image part
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.inlineData) imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
     }

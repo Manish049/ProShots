@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Camera, ChevronDown, Wand2, Maximize, Layers, Frame, Menu, X, Key, Zap } from 'lucide-react';
+import { Camera, ChevronDown, Wand2, Maximize, Layers, Frame, Menu, X, Zap } from 'lucide-react';
 import { AppStep, ToolType } from '../types';
-import NeuralConfigModal from './NeuralConfigModal';
 
 interface NavbarProps {
   onStepChange: (step: AppStep, params?: any) => void;
@@ -11,12 +10,28 @@ interface NavbarProps {
 
 const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isSynced, setIsSynced] = useState(!!localStorage.getItem('proshots_manual_key'));
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isSynced, setIsSynced] = useState(false);
 
-  const handleManualSync = (key: string) => {
-    setIsSynced(true);
-    window.dispatchEvent(new CustomEvent('neural_sync_complete', { detail: { key } }));
+  useEffect(() => {
+    const checkSync = async () => {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setIsSynced(hasKey);
+      }
+    };
+    checkSync();
+    
+    const handleSyncEvent = () => setIsSynced(true);
+    window.addEventListener('neural_sync_complete', handleSyncEvent);
+    return () => window.removeEventListener('neural_sync_complete', handleSyncEvent);
+  }, []);
+
+  const handleSyncClick = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      setIsSynced(true);
+      window.dispatchEvent(new CustomEvent('neural_sync_complete'));
+    }
   };
 
   const scrollToSection = (id: string) => {
@@ -94,7 +109,7 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
 
             <div className="flex items-center gap-4">
               <button 
-                onClick={() => setIsConfigOpen(true)}
+                onClick={handleSyncClick}
                 className={`flex items-center gap-2 px-4 py-2 rounded-2xl transition-all border font-black text-[10px] uppercase tracking-widest ${
                   isSynced 
                     ? 'bg-green-50 text-green-700 border-green-100' 
@@ -133,7 +148,7 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             >
               Success Stories
             </button>
-            <button onClick={() => { setIsConfigOpen(true); setIsMobileMenuOpen(false); }} className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 border ${isSynced ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
+            <button onClick={() => { handleSyncClick(); setIsMobileMenuOpen(false); }} className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 border ${isSynced ? 'bg-green-50 text-green-700 border-green-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
               <Zap className={`w-4 h-4 ${isSynced ? 'fill-green-500' : ''}`} />
               {isSynced ? 'Neural Engine Online' : 'Configure Connection'}
             </button>
@@ -149,13 +164,6 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
           </div>
         )}
       </nav>
-
-      <NeuralConfigModal 
-        isOpen={isConfigOpen} 
-        onClose={() => setIsConfigOpen(false)} 
-        onSync={handleManualSync}
-        isSynced={isSynced}
-      />
     </>
   );
 };

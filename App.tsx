@@ -12,7 +12,7 @@ import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto, AuthError, SafetyError, QuotaExceededError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Sparkles, Zap, AlertTriangle, Key, ShieldCheck, RefreshCw } from 'lucide-react';
+import { Sparkles, Zap, Key, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
@@ -23,24 +23,36 @@ const App: React.FC = () => {
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
   const [appError, setAppError] = useState<{title: string, msg: string, action?: string} | null>(null);
-  const [isKeyConfigured, setIsKeyConfigured] = useState(!!localStorage.getItem('proshots_manual_key'));
+  const [isKeyConfigured, setIsKeyConfigured] = useState(false);
 
   useEffect(() => {
-    const handleSync = (e: any) => {
-      setIsKeyConfigured(true);
+    const checkSync = async () => {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setIsKeyConfigured(hasKey);
+      }
     };
+    checkSync();
+    
+    const handleSync = () => setIsKeyConfigured(true);
     window.addEventListener('neural_sync_complete', handleSync);
     return () => window.removeEventListener('neural_sync_complete', handleSync);
   }, []);
 
-  const handleStepChange = (newStep: AppStep, params?: any) => {
-    if (newStep === AppStep.UPLOAD && !isKeyConfigured) {
-      setAppError({
-        title: "Neural Sync Required",
-        msg: "To perform deep anatomical character synthesis, ProShots requires a synchronized Neural Engine. Please configure your link in the Neural Console.",
-        action: "select_key"
-      });
-      return;
+  const handleStepChange = async (newStep: AppStep, params?: any) => {
+    if (newStep === AppStep.UPLOAD) {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          setAppError({
+            title: "Neural Sync Required",
+            msg: "To perform deep anatomical character synthesis, ProShots requires a synchronized Neural Engine. Please configure your link in the Neural Console.",
+            action: "select_key"
+          });
+          return;
+        }
+        setIsKeyConfigured(true);
+      }
     }
     
     if (newStep === AppStep.TOOLS) {
@@ -130,8 +142,13 @@ const App: React.FC = () => {
 
   const handleAppAction = async () => {
     if (appError?.action === 'select_key') {
-      // Logic for triggering the neural config modal or showing it
-      // For now we just reset and let user use the navbar sync
+      if (window.aistudio) {
+        await window.aistudio.openSelectKey();
+        setIsKeyConfigured(true);
+        setAppError(null);
+        window.dispatchEvent(new CustomEvent('neural_sync_complete'));
+      }
+    } else {
       setAppError(null);
     }
   };
@@ -150,10 +167,11 @@ const App: React.FC = () => {
             
             <div className="space-y-4">
               <button 
-                onClick={() => setAppError(null)}
+                onClick={handleAppAction}
                 className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl shadow-slate-200 flex items-center justify-center gap-3"
               >
-                <RefreshCw className="w-5 h-5" /> Back to Console
+                {appError.action === 'select_key' ? <Key className="w-5 h-5" /> : <RefreshCw className="w-5 h-5" />}
+                {appError.action === 'select_key' ? 'Synchronize Now' : 'Back to Console'}
               </button>
               <a 
                 href="https://ai.google.dev/gemini-api/docs/billing" 
