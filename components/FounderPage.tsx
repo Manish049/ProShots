@@ -3,6 +3,9 @@ import React from 'react';
 import { Brain, Code, Cpu, Heart, Rocket, ShieldCheck, Sparkles, Terminal, ArrowRight, Quote } from 'lucide-react';
 
 const FounderPage: React.FC = () => {
+  // Professional portrait for Manish Singh
+  const architectImage = "https://i.postimg.cc/brmcnvK0/image-png-(8).jpg";
+
   return (
     <div className="bg-white min-h-screen">
       {/* Hero Section */}
@@ -22,7 +25,7 @@ const FounderPage: React.FC = () => {
             </div>
             <div className="w-full lg:w-[450px] aspect-square rounded-[3rem] overflow-hidden bg-slate-100 relative group shadow-2xl">
               <img 
-                src="https://images.unsplash.com/photo-1633332755192-727a05c4013d?auto=format&fit=crop&q=80&w=800" 
+                src={architectImage} 
                 className="w-full h-full object-cover transition-all duration-700 group-hover:scale-105" 
                 alt="Manish Singh - Architect of ProShots"
               />
