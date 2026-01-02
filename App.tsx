@@ -10,9 +10,9 @@ import ResultGallery from './components/ResultGallery';
 import ToolsHub from './components/ToolsHub';
 import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
-import { analyzePhotos, generateEnhancedPhoto, AuthError, SafetyError, QuotaExceededError } from './services/geminiService';
+import { analyzePhotos, generateEnhancedPhoto, AuthError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Sparkles, Zap, Key, RefreshCw, ShieldCheck, PowerOff } from 'lucide-react';
+import { Zap, Key, ShieldCheck, PowerOff } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
@@ -23,35 +23,33 @@ const App: React.FC = () => {
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
   const [appError, setAppError] = useState<{title: string, msg: string, action?: string} | null>(null);
-  const [isKeyConfigured, setIsKeyConfigured] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  // APP INITIALIZATION: Connection is strictly session-based
+  // CRITICAL: Force 'false' on every fresh mount (rebuild)
+  const [isKeyConfigured, setIsKeyConfigured] = useState(false);
+
   useEffect(() => {
-    // On rebuild/refresh, we treat the engine as unsynced
-    // The user MUST click 'Sync Engine' to re-verify for the current session.
-    const syncStatus = sessionStorage.getItem('neural_session_active') === 'true';
-    setIsKeyConfigured(syncStatus);
-    
-    const handleSync = (e: any) => {
+    const handleSync = () => {
       setIsKeyConfigured(true);
-      showToast(e.detail?.message || "Engine Synchronized", 'success');
+      showToast("Neural Link Active", 'success');
+      setAppError(null);
     };
 
-    const handleDisconnect = (e: any) => {
+    const handleDisconnect = () => {
+      // 1. Terminate Access
       setIsKeyConfigured(false);
-      showToast(e.detail?.message || "Link Severed Successfully", 'error');
       
-      // DEEP PURGE: Clear all session state
+      // 2. WIPE ALL DATA (Automatic removal from app config)
       setAnalysis(null);
       setResults([]);
       setUploadedPhotos([]);
       setSelectedStyle(null);
       setAppError(null);
       
-      // REDIRECT: Go back to Landing
+      // 3. UI Reset
+      showToast("Connection Terminated", 'error');
       setStep(AppStep.LANDING);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo(0, 0);
     };
 
     window.addEventListener('neural_sync_complete', handleSync);
@@ -65,125 +63,67 @@ const App: React.FC = () => {
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => setToast(null), 3000);
   };
 
   const handleStepChange = async (newStep: AppStep, params?: any) => {
-    // Neural Verification Barrier
+    // Neural Guard: Block entry if disconnected
     if ([AppStep.UPLOAD, AppStep.TOOLS].includes(newStep)) {
-      const isSessionActive = sessionStorage.getItem('neural_session_active') === 'true';
-      
-      if (!isSessionActive) {
+      if (!isKeyConfigured) {
         setAppError({
-          title: "Engine Offline",
-          msg: "The Neural Link is currently removed or inactive. Please use the 'Sync Engine' protocol in the navbar to re-initialize.",
+          title: "Sync Required",
+          msg: "Neural Engine link is inactive. Please use 'Sync Engine' to configure your API key for this session.",
           action: "select_key"
         });
         return;
       }
-      setIsKeyConfigured(true);
     }
     
-    if (newStep === AppStep.TOOLS) {
-      if (params?.toolId) setActiveTool(params.toolId);
-    }
+    if (newStep === AppStep.TOOLS && params?.toolId) setActiveTool(params.toolId);
     setStep(newStep);
     setAppError(null);
-    if (!params?.targetId) {
-      window.scrollTo(0, 0);
-    }
+    if (!params?.targetId) window.scrollTo(0, 0);
   };
-
-  const handleFilesSelected = (files: string[]) => {
-    setUploadedPhotos(files);
-    setStep(AppStep.STYLE_SELECT);
-  };
-
-  const handleStyleSelected = (style: PhotoStyle) => {
-    setSelectedStyle(style);
-    setStep(AppStep.PROCESSING);
-    setAppError(null);
-    startAIProcessing(uploadedPhotos, style);
-  };
-
-  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   const startAIProcessing = async (photos: string[], style: PhotoStyle) => {
     try {
       setGenerationProgress({ current: 0, total: 25 });
-      
       const profile = await analyzePhotos(photos.slice(0, 5));
       setAnalysis(profile);
       
-      await delay(2000); 
-
       const generated: GeneratedImage[] = [];
-      const totalToGenerate = 25;
-      
-      for (let i = 0; i < totalToGenerate; i++) {
-        try {
-          // Mid-process verification: Ensure session remains active
-          const isSessionActive = sessionStorage.getItem('neural_session_active') === 'true';
-          if (!isSessionActive) throw new AuthError("Session was terminated during processing.");
-          
-          const refImg = photos[i % photos.length];
-          const img = await generateEnhancedPhoto(profile, style, refImg);
-          generated.push(img);
-          setGenerationProgress({ current: i + 1, total: totalToGenerate });
-          await delay(3500); 
-        } catch (error: any) {
-          console.error(`Attempt ${i + 1} failed:`, error);
-          if (error instanceof AuthError) throw error;
-          setGenerationProgress({ current: i + 1, total: totalToGenerate });
-        }
+      for (let i = 0; i < 25; i++) {
+        if (!isKeyConfigured) throw new AuthError("Session Terminated");
+        const img = await generateEnhancedPhoto(profile, style, photos[i % photos.length]);
+        generated.push(img);
+        setGenerationProgress({ current: i + 1, total: 25 });
       }
-
-      if (generated.length === 0) throw new Error("Processing failed.");
-      
       setResults(generated);
       setStep(AppStep.RESULTS);
     } catch (error: any) {
-      console.error("Critical Neural failure:", error);
-      
       if (error instanceof AuthError) {
-        setAppError({
-          title: "Link Terminated",
-          msg: "The Neural session was severed. Re-sync via the engine console to continue.",
-          action: "select_key"
-        });
-      } else if (error instanceof SafetyError) {
-        setAppError({ title: "Safety Protocol", msg: "Sensitive content detected. Re-sync with clear source images." });
+        setAppError({ title: "Link Removed", msg: "Session was terminated. Re-sync to continue.", action: "select_key" });
       } else {
-        setAppError({ title: "Pipeline Error", msg: "An unexpected error occurred. Please restart your neural session." });
+        setAppError({ title: "Engine Error", msg: "Processing failed. Please restart the session." });
       }
       setStep(AppStep.LANDING);
     }
   };
 
   const handleAppAction = async () => {
-    if (appError?.action === 'select_key') {
-      if (window.aistudio) {
-        await window.aistudio.openSelectKey();
-        window.dispatchEvent(new CustomEvent('neural_sync_complete', { 
-          detail: { message: "Link Success" } 
-        }));
-        setAppError(null);
-      }
-    } else {
-      setAppError(null);
+    if (appError?.action === 'select_key' && window.aistudio) {
+      await window.aistudio.openSelectKey();
+      window.dispatchEvent(new CustomEvent('neural_sync_complete'));
     }
+    setAppError(null);
   };
 
   return (
-    <div className="min-h-screen flex flex-col selection:bg-slate-900 selection:text-white relative">
+    <div className="min-h-screen flex flex-col relative">
       <Navbar onStepChange={handleStepChange} currentStep={step} />
       
       {toast && (
-        <div 
-          className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-4 duration-500"
-          role="alert"
-          aria-live="polite"
-        >
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-4 duration-500">
           <div className={`px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 border ${
             toast.type === 'success' ? 'bg-white border-green-100 text-green-700' : 'bg-white border-red-100 text-red-700'
           }`}>
@@ -203,11 +143,10 @@ const App: React.FC = () => {
                 <Zap className="w-10 h-10 text-amber-500 fill-amber-500" />
               </div>
               <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase">{appError.title}</h2>
-              <p className="text-slate-500 font-medium leading-relaxed mb-10">{appError.msg}</p>
-              
+              <p className="text-slate-500 font-medium mb-10">{appError.msg}</p>
               <button 
                 onClick={handleAppAction}
-                className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl shadow-slate-200 flex items-center justify-center gap-3"
+                className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl flex items-center justify-center gap-3"
               >
                 <Key className="w-5 h-5" /> Sync Engine
               </button>
@@ -220,41 +159,27 @@ const App: React.FC = () => {
                 return (
                   <>
                     <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />
-                    <section id="success-stories" className="py-40 bg-white scroll-mt-20">
-                      <div className="max-w-7xl mx-auto px-6">
-                        <div className="flex flex-col lg:flex-row items-end justify-between mb-24 gap-12">
-                          <div className="max-w-2xl">
-                            <h2 className="text-6xl font-black mb-6 tracking-tighter uppercase">Verified Output.</h2>
-                            <p className="text-xl text-slate-500 font-medium leading-relaxed">Join 12k+ users leveraging the Gemini Neural Engine.</p>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-                          {TESTIMONIALS.map((t, i) => (
-                            <div key={i} className="group relative">
-                              <div className="bg-slate-50 p-2 rounded-[3rem] border border-slate-100 hover:shadow-2xl transition-all duration-500">
-                                <div className="relative aspect-[4/5] rounded-[2.5rem] overflow-hidden mb-8">
-                                  <img src={t.after} className="w-full h-full object-cover" alt="Success Story" />
-                                </div>
-                                <div className="px-6 pb-8">
-                                  <p className="text-slate-600 font-medium mb-8 italic">"{t.content}"</p>
-                                  <div className="flex items-center gap-4 pt-6 border-t border-slate-200">
-                                    <img src={t.avatar} className="w-12 h-12 rounded-full" alt={t.name} />
-                                    <div>
-                                      <h4 className="font-black text-slate-900 text-sm">{t.name}</h4>
-                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{t.role}</p>
-                                    </div>
-                                  </div>
-                                </div>
+                    <section id="success-stories" className="py-20 bg-white">
+                      <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-10">
+                        {TESTIMONIALS.map((t, i) => (
+                          <div key={i} className="bg-slate-50 p-6 rounded-[3rem] border border-slate-100">
+                            <img src={t.after} className="w-full aspect-square object-cover rounded-[2rem] mb-6" alt="Success" />
+                            <p className="text-slate-600 font-medium italic mb-4">"{t.content}"</p>
+                            <div className="flex items-center gap-4">
+                              <img src={t.avatar} className="w-10 h-10 rounded-full" alt={t.name} />
+                              <div>
+                                <h4 className="font-black text-sm">{t.name}</h4>
+                                <p className="text-[10px] text-slate-400 font-black uppercase">{t.role}</p>
                               </div>
                             </div>
-                          ))}
-                        </div>
+                          </div>
+                        ))}
                       </div>
                     </section>
                   </>
                 );
-              case AppStep.UPLOAD: return <UploadSection onFilesSelected={handleFilesSelected} />;
-              case AppStep.STYLE_SELECT: return <StyleSelector onStyleSelected={handleStyleSelected} />;
+              case AppStep.UPLOAD: return <UploadSection onFilesSelected={(files) => { setUploadedPhotos(files); setStep(AppStep.STYLE_SELECT); }} />;
+              case AppStep.STYLE_SELECT: return <StyleSelector onStyleSelected={(style) => { setSelectedStyle(style); setStep(AppStep.PROCESSING); startAIProcessing(uploadedPhotos, style); }} />;
               case AppStep.PROCESSING: return <ProcessingStatus progress={generationProgress} />;
               case AppStep.RESULTS: return <ResultGallery images={results} onRestart={() => setStep(AppStep.LANDING)} />;
               case AppStep.TOOLS: return <ToolsHub initialTool={activeTool} />;

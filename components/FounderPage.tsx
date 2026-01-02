@@ -4,7 +4,7 @@ import { Brain, Code, Cpu, Heart, Rocket, ShieldCheck, Sparkles, Terminal, Arrow
 
 const FounderPage: React.FC = () => {
   // Professional portrait for Manish Singh
-  const architectImage = "https://i.postimg.cc/brmcnvK0/image-png-(8).jpg";
+  const architectImage = "https://i.ibb.co/XfWR7Brh/Chat-GPT-Image-Jan-2-2026-06-12-52-PM.png";
 
   return (
     <div className="bg-white min-h-screen">

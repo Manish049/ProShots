@@ -12,25 +12,10 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
 
-  // Sync state management: On rebuild/refresh, connection is removed by default
+  // CRITICAL: Force disconnected state on every rebuild/refresh.
   useEffect(() => {
-    // We only check sessionStorage to see if the user activated it in THIS session
-    const checkSessionSync = () => {
-      const isActive = sessionStorage.getItem('neural_session_active') === 'true';
-      setIsSynced(isActive);
-    };
-
-    checkSessionSync();
-
-    const handleSyncComplete = () => {
-      sessionStorage.setItem('neural_session_active', 'true');
-      setIsSynced(true);
-    };
-
-    const handleDisconnect = () => {
-      sessionStorage.removeItem('neural_session_active');
-      setIsSynced(false);
-    };
+    const handleSyncComplete = () => setIsSynced(true);
+    const handleDisconnect = () => setIsSynced(false);
 
     window.addEventListener('neural_sync_complete', handleSyncComplete);
     window.addEventListener('neural_disconnect', handleDisconnect);
@@ -43,27 +28,21 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
 
   const handleSyncClick = async () => {
     if (isSynced) {
-      // Termination Protocol: Remove API Key from app configuration context
-      const confirmed = window.confirm("TERMINATE CONNECTION: This will sever the neural link and purge all active session data. Proceed?");
-      if (confirmed) {
-        window.dispatchEvent(new CustomEvent('neural_disconnect', { 
-          detail: { message: "Neural Link Terminated" } 
-        }));
+      // Terminate: Purge key from active app context
+      if (window.confirm("TERMINATE CONNECTION: This will remove the API key link and purge all session data. Continue?")) {
+        window.dispatchEvent(new CustomEvent('neural_disconnect'));
       }
       return;
     }
 
     if (window.aistudio) {
       try {
-        // Mandatory Platform Key Selection
+        // Explicitly open the system key selection dialog
         await window.aistudio.openSelectKey();
-        
-        // After user selects the key, we assume success and activate the session
-        window.dispatchEvent(new CustomEvent('neural_sync_complete', { 
-          detail: { message: "Neural Engine Activated" } 
-        }));
+        // Signal that the engine is now active for this session
+        window.dispatchEvent(new CustomEvent('neural_sync_complete'));
       } catch (err) {
-        console.error("Neural sync failed:", err);
+        console.error("Link failed:", err);
       }
     }
   };
@@ -71,9 +50,7 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   const scrollToSection = (id: string) => {
     const action = () => {
       const element = document.getElementById(id);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth' });
-      }
+      if (element) element.scrollIntoView({ behavior: 'smooth' });
     };
 
     if (currentStep !== AppStep.LANDING) {
@@ -93,12 +70,11 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   ];
 
   return (
-    <nav className="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-xl z-50 border-b border-slate-100 h-20" role="navigation">
+    <nav className="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-xl z-50 border-b border-slate-100 h-20">
       <div className="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
         <div 
           className="flex items-center gap-2 cursor-pointer group" 
           onClick={() => onStepChange(AppStep.LANDING)}
-          aria-label="ProShots Home"
         >
           <div className="bg-slate-900 p-2 rounded-xl group-hover:rotate-12 transition-transform">
             <Camera className="w-6 h-6 text-white" />
@@ -109,7 +85,6 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
         <div className="hidden md:flex items-center gap-8">
           <div className="flex items-center gap-6 text-sm font-bold text-slate-500 uppercase tracking-widest">
             <button onClick={() => scrollToSection('how-it-works')} className="hover:text-slate-900 transition-colors">How it works</button>
-            <button onClick={() => scrollToSection('success-stories')} className="hover:text-slate-900 transition-colors">Success Stories</button>
             <div className="relative group/tools">
               <button className="flex items-center gap-1 hover:text-slate-900 transition-colors py-2">
                 Tools <ChevronDown className="w-4 h-4" />
@@ -131,7 +106,6 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
           <div className="flex items-center gap-4">
             <button 
               onClick={handleSyncClick}
-              aria-label={isSynced ? "Disconnect Neural Engine" : "Sync Neural Engine"}
               className={`group flex items-center gap-3 px-5 py-2.5 rounded-2xl transition-all border font-black text-[10px] uppercase tracking-widest ${
                 isSynced 
                   ? 'bg-green-50 text-green-700 border-green-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300' 
@@ -139,15 +113,13 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
               }`}
             >
               <div className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                isSynced 
-                  ? 'bg-green-500 animate-pulse group-hover:bg-red-500 group-hover:scale-150' 
-                  : 'bg-amber-500'
+                isSynced ? 'bg-green-500 animate-pulse group-hover:bg-red-500 group-hover:scale-150' : 'bg-amber-500'
               }`} />
-              <span className="group-hover:hidden flex items-center gap-2">
-                {isSynced ? 'Link Active' : <><Zap className="w-3 h-3" /> Sync Engine</>}
+              <span className="group-hover:hidden">
+                {isSynced ? 'Link Active' : 'Sync Engine'}
               </span>
-              <span className="hidden group-hover:inline-flex items-center gap-2 animate-in fade-in duration-200">
-                {isSynced ? <><Power className="w-3 h-3" /> Terminate</> : <><Zap className="w-3 h-3" /> Configure Engine</>}
+              <span className="hidden group-hover:inline-flex items-center gap-2">
+                {isSynced ? <><Power className="w-3 h-3" /> Terminate</> : <><Zap className="w-3 h-3" /> Sync Key</>}
               </span>
             </button>
             
@@ -166,15 +138,12 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
       </div>
 
       {isMobileMenuOpen && (
-        <div className="md:hidden absolute top-20 left-0 right-0 bg-white border-b border-slate-100 p-6 flex flex-col gap-6 shadow-2xl animate-in slide-in-from-top duration-300">
-          <button onClick={() => { scrollToSection('how-it-works'); setIsMobileMenuOpen(false); }} className="text-left py-2 font-black text-xs uppercase tracking-widest text-slate-500">How it works</button>
+        <div className="md:hidden absolute top-20 left-0 right-0 bg-white border-b border-slate-100 p-6 flex flex-col gap-6 shadow-2xl">
           <button onClick={() => { handleSyncClick(); setIsMobileMenuOpen(false); }} className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 border ${
             isSynced ? 'bg-red-50 text-red-700 border-red-100' : 'bg-amber-50 text-amber-700 border-amber-100'
           }`}>
-            {isSynced ? <ShieldOff className="w-4 h-4" /> : <Key className="w-4 h-4" />}
             {isSynced ? 'Terminate Connection' : 'Sync Engine'}
           </button>
-          <button onClick={() => { onStepChange(AppStep.UPLOAD); setIsMobileMenuOpen(false); }} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black uppercase tracking-widest">Start Creating</button>
         </div>
       )}
     </nav>
