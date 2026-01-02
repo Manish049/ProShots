@@ -3,13 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Camera, ChevronDown, Wand2, Maximize, Layers, Frame, Menu, X, Key, ExternalLink } from 'lucide-react';
 import { AppStep, ToolType } from '../types';
 
-interface NavbarProps {
-  onStepChange: (step: AppStep, params?: any) => void;
-  currentStep: AppStep;
-}
-
-// FIX: Define AIStudio interface and update Window global declaration to match environment expectations
-// and resolve errors regarding identical modifiers and property types.
+// Fix: Define AIStudio interface to match the environment's expected type for window.aistudio
 declare global {
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
@@ -17,10 +11,13 @@ declare global {
   }
 
   interface Window {
-    // Making aistudio optional to match existing environment global declarations 
-    // and resolve "identical modifiers" error.
     aistudio?: AIStudio;
   }
+}
+
+interface NavbarProps {
+  onStepChange: (step: AppStep, params?: any) => void;
+  currentStep: AppStep;
 }
 
 const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
@@ -31,12 +28,16 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   useEffect(() => {
     const checkKey = async () => {
       if (window.aistudio) {
-        const selected = await window.aistudio.hasSelectedApiKey();
-        setHasKey(selected);
+        try {
+          const selected = await window.aistudio.hasSelectedApiKey();
+          setHasKey(selected);
+        } catch (e) {
+          console.debug('Aistudio bridge check failed', e);
+        }
       }
     };
     checkKey();
-    const interval = setInterval(checkKey, 2000);
+    const interval = setInterval(checkKey, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -74,8 +75,17 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
 
   const handleKeySelect = async () => {
     if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      setHasKey(true);
+      try {
+        await window.aistudio.openSelectKey();
+        // Mandatory: Assume success to mitigate race condition
+        setHasKey(true);
+      } catch (e) {
+        console.error('Failed to open key selector', e);
+      }
+    } else {
+      // If bridge is missing on Vercel, the user should set it in the Vercel dashboard
+      // but we link them to billing docs for context.
+      window.open('https://ai.google.dev/gemini-api/docs/billing', '_blank');
     }
   };
 
@@ -92,15 +102,8 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
           <span className="text-2xl font-bold tracking-tight">ProShots</span>
         </div>
         
-        {/* Desktop Navigation */}
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-          <a 
-            href="#how-it-works" 
-            onClick={(e) => handleAnchorClick(e, 'how-it-works')}
-            className="hover:text-slate-900 transition-colors"
-          >
-            How it Works
-          </a>
+          <a href="#how-it-works" onClick={(e) => handleAnchorClick(e, 'how-it-works')} className="hover:text-slate-900 transition-colors">How it Works</a>
           
           <div className="relative">
             <button 
@@ -110,7 +113,6 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             >
               Tools <ChevronDown className={`w-4 h-4 transition-transform ${showTools ? 'rotate-180' : ''}`} />
             </button>
-            
             {showTools && (
               <div 
                 onMouseEnter={() => setShowTools(true)}
@@ -118,14 +120,8 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
                 className="absolute top-full left-0 w-56 bg-white border border-slate-100 rounded-2xl shadow-xl py-2 mt-0"
               >
                 {tools.map(tool => (
-                  <button
-                    key={tool.id}
-                    onClick={() => handleToolClick(tool.id)}
-                    className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 text-slate-600 hover:text-slate-900 transition-all"
-                  >
-                    <div className="bg-slate-100 p-1.5 rounded-lg text-slate-500">
-                      {tool.icon}
-                    </div>
+                  <button key={tool.id} onClick={() => handleToolClick(tool.id)} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 text-slate-600 hover:text-slate-900 transition-all">
+                    <div className="bg-slate-100 p-1.5 rounded-lg text-slate-500">{tool.icon}</div>
                     <span>{tool.label}</span>
                   </button>
                 ))}
@@ -133,12 +129,7 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             )}
           </div>
 
-          <button 
-            onClick={() => onStepChange(AppStep.FOUNDER)}
-            className={`hover:text-slate-900 transition-colors ${currentStep === AppStep.FOUNDER ? 'text-slate-900 font-bold underline underline-offset-4' : ''}`}
-          >
-            Architect
-          </button>
+          <button onClick={() => onStepChange(AppStep.FOUNDER)} className={`hover:text-slate-900 transition-colors ${currentStep === AppStep.FOUNDER ? 'text-slate-900 font-bold underline underline-offset-4' : ''}`}>Architect</button>
 
           <div className="h-4 w-px bg-slate-200" />
 
@@ -146,6 +137,7 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             <button 
               onClick={handleKeySelect}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all border ${hasKey ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+              title={hasKey ? 'API Key Active' : 'Selection required for high-fidelity models'}
             >
               <Key className="w-4 h-4" />
               <span className="text-xs font-bold uppercase tracking-wider">{hasKey ? 'Key Active' : 'Select API Key'}</span>
@@ -162,26 +154,16 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             </a>
           </div>
           
-          <button 
-            onClick={() => onStepChange(AppStep.UPLOAD)}
-            className="bg-slate-900 text-white px-6 py-2.5 rounded-full hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-100"
-          >
-            Get Started
-          </button>
+          <button onClick={() => onStepChange(AppStep.UPLOAD)} className="bg-slate-900 text-white px-6 py-2.5 rounded-full hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-100">Get Started</button>
         </div>
 
-        {/* Mobile Toggle */}
-        <button 
-          className="md:hidden p-2 text-slate-600 hover:text-slate-900 transition-colors"
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        >
+        <button className="md:hidden p-2 text-slate-600 hover:text-slate-900 transition-colors" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
       </div>
 
-      {/* Mobile Menu Overlay */}
       {isMobileMenuOpen && (
-        <div className="md:hidden absolute top-20 left-0 right-0 bg-white border-b border-slate-100 shadow-xl p-6 flex flex-col gap-6 animate-in slide-in-from-top-4 duration-300">
+        <div className="md:hidden absolute top-20 left-0 right-0 bg-white border-b border-slate-100 shadow-xl p-6 flex flex-col gap-6">
           <a href="#how-it-works" onClick={(e) => handleAnchorClick(e, 'how-it-works')} className="text-lg font-bold text-slate-900">How it Works</a>
           <button onClick={() => { onStepChange(AppStep.FOUNDER); setIsMobileMenuOpen(false); }} className="text-lg font-bold text-slate-900 text-left">Architect</button>
           
@@ -200,15 +182,9 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
              <button onClick={handleKeySelect} className="w-full bg-slate-50 text-slate-700 py-3 rounded-xl font-bold flex items-center justify-center gap-2 mb-2">
                 <Key className="w-4 h-4" /> {hasKey ? 'Change API Key' : 'Select API Key'}
              </button>
-             <a href="https://ai.google.dev/gemini-api/docs/billing" className="text-center block text-xs text-slate-400 font-medium">Billing Documentation</a>
           </div>
 
-          <button 
-            onClick={() => { onStepChange(AppStep.UPLOAD); setIsMobileMenuOpen(false); }}
-            className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-slate-100"
-          >
-            Get Started
-          </button>
+          <button onClick={() => { onStepChange(AppStep.UPLOAD); setIsMobileMenuOpen(false); }} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-lg">Get Started</button>
         </div>
       )}
     </nav>

@@ -25,17 +25,28 @@ export class AuthError extends Error {
   }
 }
 
-async function callGeminiWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = 3): Promise<T> {
   let lastError: any;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      return await fn();
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) {
+        throw new AuthError("API Key is missing. Please select a key via the 'Select API Key' button.");
+      }
+      
+      const ai = new GoogleGenAI({ apiKey });
+      return await fn(ai);
     } catch (error: any) {
       lastError = error;
       const errorStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
       
-      // Handle Authentication / Project Issues
-      if (errorStr.includes('401') || errorStr.includes('403') || errorStr.includes('Requested entity was not found')) {
+      // Handle Authentication / Project Issues including 'entity not found'
+      if (
+        errorStr.includes('401') || 
+        errorStr.includes('403') || 
+        errorStr.includes('Requested entity was not found') ||
+        errorStr.includes('API key not valid')
+      ) {
         throw new AuthError("Authentication failed. Please select a valid API key from a paid project.");
       }
 
@@ -74,9 +85,7 @@ const parseDataUrl = (dataUrl: string) => {
 };
 
 export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => {
-  return callGeminiWithRetry(async () => {
-    // Create new instance right before call as per instructions
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  return callGeminiWithRetry(async (ai) => {
     const parts = images.map(img => {
       const { mimeType, data } = parseDataUrl(img);
       return { inlineData: { data, mimeType } };
@@ -132,8 +141,7 @@ export const generateEnhancedPhoto = async (
   style: PhotoStyle,
   referenceImage: string
 ): Promise<GeneratedImage> => {
-  return callGeminiWithRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  return callGeminiWithRetry(async (ai) => {
     const { mimeType, data } = parseDataUrl(referenceImage);
     
     let stylePrompt = "";
@@ -192,8 +200,7 @@ export const generateEnhancedPhoto = async (
 };
 
 export const editPhotoWithText = async (baseImageUrl: string, instruction: string): Promise<string> => {
-  return callGeminiWithRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  return callGeminiWithRetry(async (ai) => {
     const { mimeType, data } = parseDataUrl(baseImageUrl);
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -211,14 +218,12 @@ export const editPhotoWithText = async (baseImageUrl: string, instruction: strin
 };
 
 export const processToolAction = async (imageUrl: string, tool: ToolType, customParams?: any): Promise<string> => {
-  return callGeminiWithRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  return callGeminiWithRetry(async (ai) => {
     const { mimeType, data } = parseDataUrl(imageUrl);
     let prompt = "";
 
     switch (tool) {
       case ToolType.WATERMARK_REMOVER:
-        // Use very neutral "restoration" language to avoid IP safety blocks
         prompt = `Perform high-fidelity surface restoration. Reconstruct textures in obscured regions using surrounding context. Output image only.`;
         break;
       case ToolType.UPSCALER:
