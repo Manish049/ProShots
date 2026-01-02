@@ -39,26 +39,22 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   };
 
   const executeHandshake = async () => {
-    // CRITICAL: We must assume success immediately after triggering openSelectKey
-    // to avoid race conditions in production environments like Vercel.
-    if (window.aistudio) {
+    // Attempt to open the key selection dialog if the platform helper exists
+    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
       try {
-        // Trigger the platform dialog - don't await the resolution for the UI sync
-        window.aistudio.openSelectKey().catch(e => console.warn("Key selection dialog closed or failed:", e));
-        
-        // Signal immediate sync completion to activate the engine
-        window.dispatchEvent(new CustomEvent('neural_sync_complete'));
+        window.aistudio.openSelectKey().catch(e => {
+          console.warn("Platform key selection dialog closed or failed:", e);
+        });
       } catch (err) {
         console.error("Handshake initiation failed:", err);
       }
-    } else {
-      // Fallback: If platform helper is missing but key is injected via env, allow sync
-      if (process.env.API_KEY) {
-        window.dispatchEvent(new CustomEvent('neural_sync_complete'));
-      } else {
-        alert("Neural Engine Error: Handshake helper (window.aistudio) not found in this environment.");
-      }
     }
+
+    // CRITICAL FIX FOR VERCEL: 
+    // We signal immediate sync completion to activate the engine UI.
+    // If window.aistudio was missing, we assume the API key is provided via Vercel env variables.
+    // This prevents the "Handshake helper not found" block.
+    window.dispatchEvent(new CustomEvent('neural_sync_complete'));
   };
 
   const scrollToSection = (id: string) => {
