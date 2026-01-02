@@ -5,7 +5,8 @@ interface AIStudio {
 }
 
 interface Window {
-  aistudio: AIStudio;
+  // Fix: Making aistudio optional to match potential internal declarations and fix "identical modifiers" error.
+  aistudio?: AIStudio;
 }
 
 declare namespace NodeJS {

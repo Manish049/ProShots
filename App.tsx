@@ -12,7 +12,7 @@ import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto, AuthError, SafetyError, QuotaExceededError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Sparkles, Zap, Key, RefreshCw } from 'lucide-react';
+import { Sparkles, Zap, Key, RefreshCw, ShieldCheck, PowerOff } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
@@ -24,35 +24,64 @@ const App: React.FC = () => {
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
   const [appError, setAppError] = useState<{title: string, msg: string, action?: string} | null>(null);
   const [isKeyConfigured, setIsKeyConfigured] = useState(false);
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
+  // APP INITIALIZATION: Connection is strictly session-based
   useEffect(() => {
-    const checkSync = async () => {
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setIsKeyConfigured(hasKey);
-      }
-    };
-    checkSync();
+    // On rebuild/refresh, we treat the engine as unsynced
+    // The user MUST click 'Sync Engine' to re-verify for the current session.
+    const syncStatus = sessionStorage.getItem('neural_session_active') === 'true';
+    setIsKeyConfigured(syncStatus);
     
-    const handleSync = () => setIsKeyConfigured(true);
+    const handleSync = (e: any) => {
+      setIsKeyConfigured(true);
+      showToast(e.detail?.message || "Engine Synchronized", 'success');
+    };
+
+    const handleDisconnect = (e: any) => {
+      setIsKeyConfigured(false);
+      showToast(e.detail?.message || "Link Severed Successfully", 'error');
+      
+      // DEEP PURGE: Clear all session state
+      setAnalysis(null);
+      setResults([]);
+      setUploadedPhotos([]);
+      setSelectedStyle(null);
+      setAppError(null);
+      
+      // REDIRECT: Go back to Landing
+      setStep(AppStep.LANDING);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     window.addEventListener('neural_sync_complete', handleSync);
-    return () => window.removeEventListener('neural_sync_complete', handleSync);
+    window.addEventListener('neural_disconnect', handleDisconnect);
+    
+    return () => {
+      window.removeEventListener('neural_sync_complete', handleSync);
+      window.removeEventListener('neural_disconnect', handleDisconnect);
+    };
   }, []);
 
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const handleStepChange = async (newStep: AppStep, params?: any) => {
-    if (newStep === AppStep.UPLOAD) {
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-          setAppError({
-            title: "Neural Sync Required",
-            msg: "To perform deep anatomical character synthesis, ProShots requires a synchronized Neural Engine. Please configure your link in the Neural Console.",
-            action: "select_key"
-          });
-          return;
-        }
-        setIsKeyConfigured(true);
+    // Neural Verification Barrier
+    if ([AppStep.UPLOAD, AppStep.TOOLS].includes(newStep)) {
+      const isSessionActive = sessionStorage.getItem('neural_session_active') === 'true';
+      
+      if (!isSessionActive) {
+        setAppError({
+          title: "Engine Offline",
+          msg: "The Neural Link is currently removed or inactive. Please use the 'Sync Engine' protocol in the navbar to re-initialize.",
+          action: "select_key"
+        });
+        return;
       }
+      setIsKeyConfigured(true);
     }
     
     if (newStep === AppStep.TOOLS) {
@@ -93,50 +122,41 @@ const App: React.FC = () => {
       
       for (let i = 0; i < totalToGenerate; i++) {
         try {
+          // Mid-process verification: Ensure session remains active
+          const isSessionActive = sessionStorage.getItem('neural_session_active') === 'true';
+          if (!isSessionActive) throw new AuthError("Session was terminated during processing.");
+          
           const refImg = photos[i % photos.length];
           const img = await generateEnhancedPhoto(profile, style, refImg);
           generated.push(img);
           setGenerationProgress({ current: i + 1, total: totalToGenerate });
           await delay(3500); 
         } catch (error: any) {
-          console.error(`Generation attempt ${i + 1} failed:`, error);
+          console.error(`Attempt ${i + 1} failed:`, error);
           if (error instanceof AuthError) throw error;
           setGenerationProgress({ current: i + 1, total: totalToGenerate });
         }
       }
 
-      if (generated.length === 0) {
-        throw new Error("Could not generate any images. Try a different style or photos.");
-      }
+      if (generated.length === 0) throw new Error("Processing failed.");
       
       setResults(generated);
       setStep(AppStep.RESULTS);
     } catch (error: any) {
-      console.error("Critical AI Processing failure:", error);
+      console.error("Critical Neural failure:", error);
       
       if (error instanceof AuthError) {
         setAppError({
-          title: "Engine Disconnected",
-          msg: "The Neural Sync was interrupted or the key is invalid. Please re-synchronize to continue.",
+          title: "Link Terminated",
+          msg: "The Neural session was severed. Re-sync via the engine console to continue.",
           action: "select_key"
         });
       } else if (error instanceof SafetyError) {
-        setAppError({
-          title: "Safety Shield Block",
-          msg: "The AI detected potentially sensitive content. Please ensure your photos adhere to professional guidelines.",
-        });
-      } else if (error instanceof QuotaExceededError) {
-        setAppError({
-          title: "Neural Traffic High",
-          msg: "We are currently processing peak volume. Please retry in 60 seconds.",
-        });
+        setAppError({ title: "Safety Protocol", msg: "Sensitive content detected. Re-sync with clear source images." });
       } else {
-        setAppError({
-          title: "Processing Error",
-          msg: "An unexpected error occurred in the neural pipeline. Let's try that again.",
-        });
+        setAppError({ title: "Pipeline Error", msg: "An unexpected error occurred. Please restart your neural session." });
       }
-      setStep(AppStep.UPLOAD);
+      setStep(AppStep.LANDING);
     }
   };
 
@@ -144,114 +164,105 @@ const App: React.FC = () => {
     if (appError?.action === 'select_key') {
       if (window.aistudio) {
         await window.aistudio.openSelectKey();
-        setIsKeyConfigured(true);
+        window.dispatchEvent(new CustomEvent('neural_sync_complete', { 
+          detail: { message: "Link Success" } 
+        }));
         setAppError(null);
-        window.dispatchEvent(new CustomEvent('neural_sync_complete'));
       }
     } else {
       setAppError(null);
     }
   };
 
-  const renderContent = () => {
-    if (appError) {
-      return (
-        <div className="max-w-xl mx-auto px-6 py-32 text-center animate-in fade-in zoom-in duration-500">
-          <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-2 bg-amber-400" />
-            <div className="bg-amber-50 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8">
-              <Zap className="w-10 h-10 text-amber-500 fill-amber-500" />
+  return (
+    <div className="min-h-screen flex flex-col selection:bg-slate-900 selection:text-white relative">
+      <Navbar onStepChange={handleStepChange} currentStep={step} />
+      
+      {toast && (
+        <div 
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-4 duration-500"
+          role="alert"
+          aria-live="polite"
+        >
+          <div className={`px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 border ${
+            toast.type === 'success' ? 'bg-white border-green-100 text-green-700' : 'bg-white border-red-100 text-red-700'
+          }`}>
+            <div className={`p-2 rounded-xl ${toast.type === 'success' ? 'bg-green-50' : 'bg-red-50'}`}>
+              {toast.type === 'success' ? <ShieldCheck className="w-5 h-5" /> : <PowerOff className="w-5 h-5" />}
             </div>
-            <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase">{appError.title}</h2>
-            <p className="text-slate-500 font-medium leading-relaxed mb-10">{appError.msg}</p>
-            
-            <div className="space-y-4">
+            <span className="text-sm font-black uppercase tracking-widest">{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      <main className="flex-1 pt-20">
+        {appError ? (
+          <div className="max-w-xl mx-auto px-6 py-32 text-center animate-in fade-in zoom-in duration-500">
+            <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
+              <div className="bg-amber-50 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8">
+                <Zap className="w-10 h-10 text-amber-500 fill-amber-500" />
+              </div>
+              <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase">{appError.title}</h2>
+              <p className="text-slate-500 font-medium leading-relaxed mb-10">{appError.msg}</p>
+              
               <button 
                 onClick={handleAppAction}
                 className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl shadow-slate-200 flex items-center justify-center gap-3"
               >
-                {appError.action === 'select_key' ? <Key className="w-5 h-5" /> : <RefreshCw className="w-5 h-5" />}
-                {appError.action === 'select_key' ? 'Synchronize Now' : 'Back to Console'}
+                <Key className="w-5 h-5" /> Sync Engine
               </button>
-              <a 
-                href="https://ai.google.dev/gemini-api/docs/billing" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="block text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors"
-              >
-                Why is synchronization required?
-              </a>
             </div>
           </div>
-        </div>
-      );
-    }
-
-    switch (step) {
-      case AppStep.LANDING:
-        return (
-          <>
-            <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />
-            <section id="success-stories" className="py-40 bg-white scroll-mt-20">
-              <div className="max-w-7xl mx-auto px-6">
-                <div className="flex flex-col lg:flex-row items-end justify-between mb-24 gap-12">
-                  <div className="max-w-2xl">
-                    <h2 className="text-6xl font-black mb-6 tracking-tighter uppercase">Proof in Pixels.</h2>
-                    <p className="text-xl text-slate-500 font-medium leading-relaxed">
-                      We've helped over 12,000 professionals land their dream roles through high-impact imagery.
-                    </p>
-                  </div>
-                  <div className="flex gap-4 p-2 bg-slate-50 rounded-[2rem] border border-slate-100">
-                    <div className="px-8 py-6 bg-white rounded-[1.5rem] shadow-sm text-center border border-slate-100">
-                      <div className="text-3xl font-black text-slate-900">12k+</div>
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Users</div>
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-                  {TESTIMONIALS.map((t, i) => (
-                    <div key={i} className="group relative">
-                      <div className="bg-slate-50 p-2 rounded-[3rem] border border-slate-100 hover:shadow-2xl transition-all duration-500">
-                        <div className="relative aspect-[4/5] rounded-[2.5rem] overflow-hidden mb-8">
-                          <img src={t.after} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Result" />
-                          <div className="absolute top-4 left-4 right-4 flex justify-between">
-                            <div className="bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-sm">After</div>
-                            <div className="bg-slate-900 text-white px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest">Enhanced</div>
+        ) : (
+          (() => {
+            switch (step) {
+              case AppStep.LANDING:
+                return (
+                  <>
+                    <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />
+                    <section id="success-stories" className="py-40 bg-white scroll-mt-20">
+                      <div className="max-w-7xl mx-auto px-6">
+                        <div className="flex flex-col lg:flex-row items-end justify-between mb-24 gap-12">
+                          <div className="max-w-2xl">
+                            <h2 className="text-6xl font-black mb-6 tracking-tighter uppercase">Verified Output.</h2>
+                            <p className="text-xl text-slate-500 font-medium leading-relaxed">Join 12k+ users leveraging the Gemini Neural Engine.</p>
                           </div>
                         </div>
-                        <div className="px-6 pb-8">
-                          <p className="text-slate-600 font-medium mb-8 leading-relaxed italic">"{t.content}"</p>
-                          <div className="flex items-center gap-4 pt-6 border-t border-slate-200">
-                            <img src={t.avatar} className="w-12 h-12 rounded-full border-2 border-white shadow-md" alt={t.name} />
-                            <div>
-                              <h4 className="font-black text-slate-900 text-sm">{t.name}</h4>
-                              <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{t.role}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+                          {TESTIMONIALS.map((t, i) => (
+                            <div key={i} className="group relative">
+                              <div className="bg-slate-50 p-2 rounded-[3rem] border border-slate-100 hover:shadow-2xl transition-all duration-500">
+                                <div className="relative aspect-[4/5] rounded-[2.5rem] overflow-hidden mb-8">
+                                  <img src={t.after} className="w-full h-full object-cover" alt="Success Story" />
+                                </div>
+                                <div className="px-6 pb-8">
+                                  <p className="text-slate-600 font-medium mb-8 italic">"{t.content}"</p>
+                                  <div className="flex items-center gap-4 pt-6 border-t border-slate-200">
+                                    <img src={t.avatar} className="w-12 h-12 rounded-full" alt={t.name} />
+                                    <div>
+                                      <h4 className="font-black text-slate-900 text-sm">{t.name}</h4>
+                                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{t.role}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                          </div>
+                          ))}
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
-          </>
-        );
-      case AppStep.UPLOAD: return <UploadSection onFilesSelected={handleFilesSelected} />;
-      case AppStep.STYLE_SELECT: return <StyleSelector onStyleSelected={handleStyleSelected} />;
-      case AppStep.PROCESSING: return <ProcessingStatus progress={generationProgress} />;
-      case AppStep.RESULTS: return <ResultGallery images={results} onRestart={() => setStep(AppStep.LANDING)} />;
-      case AppStep.TOOLS: return <ToolsHub initialTool={activeTool} />;
-      case AppStep.FOUNDER: return <FounderPage />;
-      default: return <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />;
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex flex-col selection:bg-slate-900 selection:text-white">
-      <Navbar onStepChange={handleStepChange} currentStep={step} />
-      <main className="flex-1 pt-20">
-        {renderContent()}
+                    </section>
+                  </>
+                );
+              case AppStep.UPLOAD: return <UploadSection onFilesSelected={handleFilesSelected} />;
+              case AppStep.STYLE_SELECT: return <StyleSelector onStyleSelected={handleStyleSelected} />;
+              case AppStep.PROCESSING: return <ProcessingStatus progress={generationProgress} />;
+              case AppStep.RESULTS: return <ResultGallery images={results} onRestart={() => setStep(AppStep.LANDING)} />;
+              case AppStep.TOOLS: return <ToolsHub initialTool={activeTool} />;
+              case AppStep.FOUNDER: return <FounderPage />;
+              default: return <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />;
+            }
+          })()
+        )}
       </main>
       <Footer />
     </div>
