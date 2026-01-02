@@ -4,6 +4,11 @@ import { UserAnalysis, PhotoStyle, GeneratedImage, ToolType } from "../types";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper to get the most up-to-date API key
+const getActiveApiKey = () => {
+  return localStorage.getItem('proshots_manual_key') || process.env.API_KEY;
+};
+
 export class QuotaExceededError extends Error {
   constructor(message: string) {
     super(message);
@@ -29,9 +34,9 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
   let lastError: any;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const apiKey = process.env.API_KEY;
+      const apiKey = getActiveApiKey();
       if (!apiKey) {
-        throw new AuthError("API Key is missing. Please select a key via the 'Select API Key' button.");
+        throw new AuthError("API Key is missing. Please enter your key in the Neural Console.");
       }
       
       const ai = new GoogleGenAI({ apiKey });
@@ -47,7 +52,7 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
         errorStr.includes('Requested entity was not found') ||
         errorStr.includes('API key not valid')
       ) {
-        throw new AuthError("Authentication failed. Please select a valid API key from a paid project.");
+        throw new AuthError("Authentication failed. Ensure your API Key is valid and billing is enabled.");
       }
 
       // Handle Safety Blocks

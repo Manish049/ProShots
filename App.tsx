@@ -12,7 +12,7 @@ import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto, AuthError, SafetyError, QuotaExceededError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Sparkles, TrendingUp, Users, CheckCircle, Brain, AlertTriangle } from 'lucide-react';
+import { Sparkles, Zap, AlertTriangle, Key, ShieldCheck, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
@@ -23,8 +23,26 @@ const App: React.FC = () => {
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
   const [appError, setAppError] = useState<{title: string, msg: string, action?: string} | null>(null);
+  const [isKeyConfigured, setIsKeyConfigured] = useState(!!localStorage.getItem('proshots_manual_key'));
+
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      setIsKeyConfigured(true);
+    };
+    window.addEventListener('neural_sync_complete', handleSync);
+    return () => window.removeEventListener('neural_sync_complete', handleSync);
+  }, []);
 
   const handleStepChange = (newStep: AppStep, params?: any) => {
+    if (newStep === AppStep.UPLOAD && !isKeyConfigured) {
+      setAppError({
+        title: "Neural Sync Required",
+        msg: "To perform deep anatomical character synthesis, ProShots requires a synchronized Neural Engine. Please configure your link in the Neural Console.",
+        action: "select_key"
+      });
+      return;
+    }
+    
     if (newStep === AppStep.TOOLS) {
       if (params?.toolId) setActiveTool(params.toolId);
     }
@@ -86,24 +104,24 @@ const App: React.FC = () => {
       
       if (error instanceof AuthError) {
         setAppError({
-          title: "Authentication Required",
-          msg: "Your API key is invalid or restricted. Please select a valid API key from a paid GCP project.",
+          title: "Engine Disconnected",
+          msg: "The Neural Sync was interrupted or the key is invalid. Please re-synchronize to continue.",
           action: "select_key"
         });
       } else if (error instanceof SafetyError) {
         setAppError({
-          title: "Safety Filter Blocked",
-          msg: "Your photos or selection triggered the safety filters. Please try more clear, professional photos.",
+          title: "Safety Shield Block",
+          msg: "The AI detected potentially sensitive content. Please ensure your photos adhere to professional guidelines.",
         });
       } else if (error instanceof QuotaExceededError) {
         setAppError({
-          title: "Service Overloaded",
-          msg: "ProShots is at capacity. Please try again in 5-10 minutes.",
+          title: "Neural Traffic High",
+          msg: "We are currently processing peak volume. Please retry in 60 seconds.",
         });
       } else {
         setAppError({
-          title: "Neural Interruption",
-          msg: "The connection to the AI engine was lost. Please refresh and try again.",
+          title: "Processing Error",
+          msg: "An unexpected error occurred in the neural pipeline. Let's try that again.",
         });
       }
       setStep(AppStep.UPLOAD);
@@ -111,35 +129,41 @@ const App: React.FC = () => {
   };
 
   const handleAppAction = async () => {
-    if (appError?.action === 'select_key' && window.aistudio) {
-      await window.aistudio.openSelectKey();
+    if (appError?.action === 'select_key') {
+      // Logic for triggering the neural config modal or showing it
+      // For now we just reset and let user use the navbar sync
       setAppError(null);
     }
   };
 
   const renderContent = () => {
-    if (appError && step === AppStep.UPLOAD) {
+    if (appError) {
       return (
-        <div className="max-w-xl mx-auto px-6 py-20 text-center animate-in fade-in zoom-in duration-500">
-          <div className="bg-amber-50 p-8 rounded-[3rem] border border-amber-100 mb-12">
-            <AlertTriangle className="w-16 h-16 text-amber-500 mx-auto mb-6" />
-            <h2 className="text-3xl font-black mb-4 tracking-tight">{appError.title}</h2>
-            <p className="text-slate-600 font-medium leading-relaxed mb-8">{appError.msg}</p>
-            {appError.action === 'select_key' ? (
-              <button 
-                onClick={handleAppAction}
-                className="bg-slate-900 text-white px-10 py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-100"
-              >
-                Select Paid API Key
-              </button>
-            ) : (
+        <div className="max-w-xl mx-auto px-6 py-32 text-center animate-in fade-in zoom-in duration-500">
+          <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-2 bg-amber-400" />
+            <div className="bg-amber-50 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8">
+              <Zap className="w-10 h-10 text-amber-500 fill-amber-500" />
+            </div>
+            <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase">{appError.title}</h2>
+            <p className="text-slate-500 font-medium leading-relaxed mb-10">{appError.msg}</p>
+            
+            <div className="space-y-4">
               <button 
                 onClick={() => setAppError(null)}
-                className="bg-slate-900 text-white px-10 py-4 rounded-2xl font-bold hover:bg-slate-800 transition-all"
+                className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl shadow-slate-200 flex items-center justify-center gap-3"
               >
-                Try Again
+                <RefreshCw className="w-5 h-5" /> Back to Console
               </button>
-            )}
+              <a 
+                href="https://ai.google.dev/gemini-api/docs/billing" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="block text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors"
+              >
+                Why is synchronization required?
+              </a>
+            </div>
           </div>
         </div>
       );
@@ -149,8 +173,8 @@ const App: React.FC = () => {
       case AppStep.LANDING:
         return (
           <>
-            <Hero onStart={() => setStep(AppStep.UPLOAD)} />
-            <section id="testimonials" className="py-40 bg-white scroll-mt-20">
+            <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />
+            <section id="success-stories" className="py-40 bg-white scroll-mt-20">
               <div className="max-w-7xl mx-auto px-6">
                 <div className="flex flex-col lg:flex-row items-end justify-between mb-24 gap-12">
                   <div className="max-w-2xl">
@@ -160,7 +184,7 @@ const App: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex gap-4 p-2 bg-slate-50 rounded-[2rem] border border-slate-100">
-                    <div className="px-8 py-6 bg-white rounded-[1.5rem] shadow-sm text-center">
+                    <div className="px-8 py-6 bg-white rounded-[1.5rem] shadow-sm text-center border border-slate-100">
                       <div className="text-3xl font-black text-slate-900">12k+</div>
                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Users</div>
                     </div>
@@ -201,7 +225,7 @@ const App: React.FC = () => {
       case AppStep.RESULTS: return <ResultGallery images={results} onRestart={() => setStep(AppStep.LANDING)} />;
       case AppStep.TOOLS: return <ToolsHub initialTool={activeTool} />;
       case AppStep.FOUNDER: return <FounderPage />;
-      default: return <Hero onStart={() => setStep(AppStep.UPLOAD)} />;
+      default: return <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />;
     }
   };
 
