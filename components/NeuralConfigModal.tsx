@@ -14,9 +14,10 @@ const NeuralConfigModal: React.FC<NeuralConfigModalProps> = ({ isOpen, onClose, 
   if (!isOpen) return null;
 
   const handleSync = () => {
-    // Note: The configuration code is used for neural handshake visualization.
-    // The actual API key is handled by the platform dialog triggered next.
+    // 1. Initiate the handshake (opens the system dialog)
     onSync();
+    
+    // 2. Immediately close the modal to allow the system dialog to take focus
     onClose();
   };
 

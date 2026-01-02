@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Camera, ChevronDown, Wand2, Maximize, Layers, Frame, Menu, X, Zap, Power, ShieldOff, Key } from 'lucide-react';
+import { Camera, ChevronDown, Wand2, Maximize, Layers, Frame, Menu, X, Zap, Power, ShieldOff, Key, User } from 'lucide-react';
 import { AppStep, ToolType } from '../types';
 import NeuralConfigModal from './NeuralConfigModal';
 
@@ -39,12 +39,24 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   };
 
   const executeHandshake = async () => {
+    // CRITICAL: We must assume success immediately after triggering openSelectKey
+    // to avoid race conditions in production environments like Vercel.
     if (window.aistudio) {
       try {
-        await window.aistudio.openSelectKey();
+        // Trigger the platform dialog - don't await the resolution for the UI sync
+        window.aistudio.openSelectKey().catch(e => console.warn("Key selection dialog closed or failed:", e));
+        
+        // Signal immediate sync completion to activate the engine
         window.dispatchEvent(new CustomEvent('neural_sync_complete'));
       } catch (err) {
-        console.error("Handshake failed:", err);
+        console.error("Handshake initiation failed:", err);
+      }
+    } else {
+      // Fallback: If platform helper is missing but key is injected via env, allow sync
+      if (process.env.API_KEY) {
+        window.dispatchEvent(new CustomEvent('neural_sync_complete'));
+      } else {
+        alert("Neural Engine Error: Handshake helper (window.aistudio) not found in this environment.");
       }
     }
   };
@@ -71,13 +83,18 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
     { id: ToolType.RESIZER, label: 'Photo Resizing', icon: <Frame className="w-4 h-4" /> },
   ];
 
+  const handleMobileNav = (step: AppStep, params?: any) => {
+    onStepChange(step, params);
+    setIsMobileMenuOpen(false);
+  };
+
   return (
     <>
-      <nav className="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-xl z-50 border-b border-slate-100 h-20">
+      <nav className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-xl z-[60] border-b border-slate-100 h-20">
         <div className="max-w-7xl mx-auto px-6 h-full flex items-center justify-between">
           <div 
             className="flex items-center gap-2 cursor-pointer group" 
-            onClick={() => onStepChange(AppStep.LANDING)}
+            onClick={() => handleMobileNav(AppStep.LANDING)}
           >
             <div className="bg-slate-900 p-2 rounded-xl group-hover:rotate-12 transition-transform">
               <Camera className="w-6 h-6 text-white" />
@@ -85,6 +102,7 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             <span className="text-2xl font-black tracking-tighter">ProShots</span>
           </div>
           
+          {/* Desktop Menu */}
           <div className="hidden md:flex items-center gap-8">
             <div className="flex items-center gap-6 text-sm font-bold text-slate-500 uppercase tracking-widest">
               <button onClick={() => scrollToSection('how-it-works')} className="hover:text-slate-900 transition-colors">How it works</button>
@@ -135,18 +153,58 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             </div>
           </div>
 
-          <button className="md:hidden p-2 text-slate-900" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          <button className="md:hidden p-2 text-slate-900 focus:outline-none" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+            {isMobileMenuOpen ? <X className="w-8 h-8" /> : <Menu className="w-8 h-8" />}
           </button>
         </div>
 
+        {/* Improved Mobile Menu Drawer */}
         {isMobileMenuOpen && (
-          <div className="md:hidden absolute top-20 left-0 right-0 bg-white border-b border-slate-100 p-6 flex flex-col gap-6 shadow-2xl">
-            <button onClick={() => { handleSyncInitiate(); setIsMobileMenuOpen(false); }} className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 border ${
-              isSynced ? 'bg-red-50 text-red-700 border-red-100' : 'bg-amber-50 text-amber-700 border-amber-100'
-            }`}>
-              {isSynced ? 'Terminate Connection' : 'Sync Engine'}
-            </button>
+          <div className="md:hidden absolute top-20 left-0 right-0 bg-white border-b border-slate-100 shadow-2xl animate-in slide-in-from-top duration-300 overflow-y-auto max-h-[calc(100vh-80px)]">
+            <div className="p-6 flex flex-col gap-1">
+              {/* Primary Links */}
+              <button onClick={() => scrollToSection('how-it-works')} className="w-full text-left py-4 px-4 hover:bg-slate-50 rounded-2xl font-black text-sm uppercase tracking-widest text-slate-900">How it works</button>
+              <button onClick={() => handleMobileNav(AppStep.FOUNDER)} className="w-full text-left py-4 px-4 hover:bg-slate-50 rounded-2xl font-black text-sm uppercase tracking-widest text-slate-900 flex items-center gap-3">
+                <User className="w-4 h-4" /> Architect
+              </button>
+              
+              <div className="my-4 h-px bg-slate-100" />
+              
+              {/* Tools Section */}
+              <div className="px-4 mb-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Neural Tools</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                {tools.map(tool => (
+                  <button key={tool.id} onClick={() => handleMobileNav(AppStep.TOOLS, { toolId: tool.id })} className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-4 text-slate-600 rounded-2xl">
+                    <div className="bg-slate-100 p-2 rounded-xl text-slate-500">{tool.icon}</div>
+                    <span className="text-xs font-black uppercase tracking-tight">{tool.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="my-4 h-px bg-slate-100" />
+
+              {/* Action Buttons */}
+              <div className="space-y-3 pt-2">
+                <button 
+                  onClick={() => { handleSyncInitiate(); setIsMobileMenuOpen(false); }} 
+                  className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 border shadow-sm ${
+                    isSynced ? 'bg-red-50 text-red-700 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}
+                >
+                  {isSynced ? <ShieldOff className="w-4 h-4" /> : <Zap className="w-4 h-4" />}
+                  {isSynced ? 'Terminate Link' : 'Sync Engine'}
+                </button>
+                
+                <button 
+                  onClick={() => handleMobileNav(AppStep.UPLOAD)}
+                  className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl"
+                >
+                  Get Started <Camera className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </nav>
