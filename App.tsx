@@ -25,7 +25,7 @@ const App: React.FC = () => {
   const [appError, setAppError] = useState<{title: string, msg: string, action?: string} | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  // CRITICAL: Force 'false' on every fresh mount (rebuild)
+  // CRITICAL: isKeyConfigured is reset to FALSE on every mount (rebuild/refresh)
   const [isKeyConfigured, setIsKeyConfigured] = useState(false);
 
   useEffect(() => {
@@ -36,18 +36,18 @@ const App: React.FC = () => {
     };
 
     const handleDisconnect = () => {
-      // 1. Terminate Access
+      // 1. Terminate Session Configuration
       setIsKeyConfigured(false);
       
-      // 2. WIPE ALL DATA (Automatic removal from app config)
+      // 2. HARD PURGE: Clear all session-specific memory
       setAnalysis(null);
       setResults([]);
       setUploadedPhotos([]);
       setSelectedStyle(null);
       setAppError(null);
       
-      // 3. UI Reset
-      showToast("Connection Terminated", 'error');
+      // 3. UI RESET
+      showToast("Link Terminated & Purged", 'error');
       setStep(AppStep.LANDING);
       window.scrollTo(0, 0);
     };
@@ -67,13 +67,13 @@ const App: React.FC = () => {
   };
 
   const handleStepChange = async (newStep: AppStep, params?: any) => {
-    // Neural Guard: Block entry if disconnected
+    // Session Verification barrier
     if ([AppStep.UPLOAD, AppStep.TOOLS].includes(newStep)) {
       if (!isKeyConfigured) {
         setAppError({
           title: "Sync Required",
-          msg: "Neural Engine link is inactive. Please use 'Sync Engine' to configure your API key for this session.",
-          action: "select_key"
+          msg: "Neural Engine link is offline. Use the 'Sync Engine' protocol to re-establish access for this session.",
+          action: "open_config"
         });
         return;
       }
@@ -93,6 +93,7 @@ const App: React.FC = () => {
       
       const generated: GeneratedImage[] = [];
       for (let i = 0; i < 25; i++) {
+        // Continuous verification of engine link status
         if (!isKeyConfigured) throw new AuthError("Session Terminated");
         const img = await generateEnhancedPhoto(profile, style, photos[i % photos.length]);
         generated.push(img);
@@ -102,20 +103,22 @@ const App: React.FC = () => {
       setStep(AppStep.RESULTS);
     } catch (error: any) {
       if (error instanceof AuthError) {
-        setAppError({ title: "Link Removed", msg: "Session was terminated. Re-sync to continue.", action: "select_key" });
+        setAppError({ title: "Link Severed", msg: "The session link was removed. Re-sync to continue.", action: "open_config" });
       } else {
-        setAppError({ title: "Engine Error", msg: "Processing failed. Please restart the session." });
+        setAppError({ title: "Engine Error", msg: "Processing failed. Restart the neural link." });
       }
       setStep(AppStep.LANDING);
     }
   };
 
-  const handleAppAction = async () => {
-    if (appError?.action === 'select_key' && window.aistudio) {
-      await window.aistudio.openSelectKey();
-      window.dispatchEvent(new CustomEvent('neural_sync_complete'));
+  const handleAppAction = () => {
+    if (appError?.action === 'open_config') {
+      // Directs user to the Navbar sync button behavior
+      setAppError(null);
+      showToast("Use the Sync Engine button in the navbar", 'success');
+    } else {
+      setAppError(null);
     }
-    setAppError(null);
   };
 
   return (
@@ -148,7 +151,7 @@ const App: React.FC = () => {
                 onClick={handleAppAction}
                 className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl flex items-center justify-center gap-3"
               >
-                <Key className="w-5 h-5" /> Sync Engine
+                <Key className="w-5 h-5" /> Re-sync Engine
               </button>
             </div>
           </div>
