@@ -12,7 +12,7 @@ import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto, AuthError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Zap, Key, ShieldCheck, PowerOff, AlertTriangle, ExternalLink, ListChecks, RefreshCw } from 'lucide-react';
+import { Key, ShieldCheck, PowerOff, AlertTriangle, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
@@ -22,47 +22,23 @@ const App: React.FC = () => {
   const [analysis, setAnalysis] = useState<UserAnalysis | null>(null);
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
-  const [appError, setAppError] = useState<{title: string, msg: string, action?: string, isProduction?: boolean} | null>(null);
+  const [appError, setAppError] = useState<{title: string, msg: string, action?: 'sync' | 'retry'} | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [isKeyConfigured, setIsKeyConfigured] = useState(false);
 
+  const checkConfig = async () => {
+    const envKey = process.env.API_KEY;
+    const hasEnv = !!(envKey && envKey !== 'undefined' && envKey !== 'null' && envKey !== '');
+    const hasPlatform = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
+    const isOk = hasEnv || hasPlatform;
+    setIsKeyConfigured(isOk);
+    return isOk;
+  };
+
   useEffect(() => {
-    const checkKey = async () => {
-      // Check both baked-in and runtime-injected sources
-      const envKey = process.env.API_KEY;
-      const envKeyValid = envKey && envKey !== 'undefined' && envKey !== 'null' && envKey !== '';
-      
-      const runtimeProcess = (globalThis as any).process || (window as any).process;
-      const runtimeKey = runtimeProcess?.env?.API_KEY;
-      const runtimeKeyValid = runtimeKey && runtimeKey !== 'undefined' && runtimeKey !== 'null' && runtimeKey !== '';
-
-      const platformKey = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
-      
-      if (envKeyValid || runtimeKeyValid || platformKey) {
-        setIsKeyConfigured(true);
-      } else {
-        setIsKeyConfigured(false);
-      }
-    };
-
-    checkKey();
-
-    const handleSync = () => {
-      setIsKeyConfigured(true);
-      showToast("Neural Link Established", 'success');
-      setAppError(null);
-    };
-
-    window.addEventListener('neural_sync_complete', handleSync);
-    window.addEventListener('neural_disconnect', () => setIsKeyConfigured(false));
-    
-    // Periodically re-check for injected keys from platform
-    const interval = setInterval(checkKey, 2000);
-    
-    return () => {
-      window.removeEventListener('neural_sync_complete', handleSync);
-      clearInterval(interval);
-    };
+    checkConfig();
+    const interval = setInterval(checkConfig, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -72,15 +48,12 @@ const App: React.FC = () => {
 
   const handleStepChange = async (newStep: AppStep, params?: any) => {
     if ([AppStep.UPLOAD, AppStep.TOOLS].includes(newStep)) {
-      if (!isKeyConfigured) {
-        const isProd = window.location.hostname !== 'localhost' && !window.aistudio;
+      const ok = await checkConfig();
+      if (!ok) {
         setAppError({
-          title: "Neural Engine Offline",
-          msg: isProd 
-            ? "Authentication missing in production environment. No API Key detected." 
-            : "No API Key found. Establish a secure link to continue.",
-          action: "open_config",
-          isProduction: isProd
+          title: "Engine Offline",
+          msg: "Please connect your Gemini API Key to continue.",
+          action: 'sync'
         });
         return;
       }
@@ -107,39 +80,28 @@ const App: React.FC = () => {
       setResults(generated);
       setStep(AppStep.RESULTS);
     } catch (error: any) {
-      if (error instanceof AuthError) {
-        setAppError({ 
-          title: "Authentication Failed", 
-          msg: error.message, 
-          action: "open_config",
-          isProduction: !window.aistudio 
-        });
+      if (error instanceof AuthError || error.message?.includes('API_KEY_MISSING')) {
+        setAppError({ title: "Auth Required", msg: "Connect your Gemini API key to start processing.", action: 'sync' });
       } else {
-        setAppError({ 
-          title: "Neural Engine Error", 
-          msg: "The AI processing pipeline failed. Ensure your connection is stable and try again." 
-        });
+        setAppError({ title: "Neural Fault", msg: error.message || "The AI engine encountered a processing error.", action: 'retry' });
       }
       setStep(AppStep.LANDING);
     }
   };
 
   const handleAppAction = async () => {
-    if (appError?.action === 'open_config') {
+    if (appError?.action === 'sync') {
       if (window.aistudio) {
-        try {
-          await window.aistudio.openSelectKey();
-          // Force set locally immediately to allow progress as per guidelines
-          setIsKeyConfigured(true);
-          window.dispatchEvent(new CustomEvent('neural_sync_complete'));
-        } catch (e) {
-          console.warn("Handshake cancelled");
-        }
+        await window.aistudio.openSelectKey();
+        setIsKeyConfigured(true);
+        setAppError(null);
+        showToast("Engine Connected", 'success');
       } else {
-        window.location.reload(); 
+        window.location.reload();
       }
+    } else {
+      setAppError(null);
     }
-    setAppError(null);
   };
 
   return (
@@ -147,13 +109,11 @@ const App: React.FC = () => {
       <Navbar onStepChange={handleStepChange} currentStep={step} />
       
       {toast && (
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-4 duration-500">
-          <div className={`px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 border ${
-            toast.type === 'success' ? 'bg-white border-green-100 text-green-700' : 'bg-white border-red-100 text-red-700'
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-4">
+          <div className={`px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-4 border bg-white ${
+            toast.type === 'success' ? 'border-green-100 text-green-700' : 'border-red-100 text-red-700'
           }`}>
-            <div className={`p-2 rounded-xl ${toast.type === 'success' ? 'bg-green-50' : 'bg-red-50'}`}>
-              {toast.type === 'success' ? <ShieldCheck className="w-5 h-5" /> : <PowerOff className="w-5 h-5" />}
-            </div>
+            {toast.type === 'success' ? <ShieldCheck className="w-5 h-5" /> : <PowerOff className="w-5 h-5" />}
             <span className="text-sm font-black uppercase tracking-widest">{toast.message}</span>
           </div>
         </div>
@@ -161,37 +121,20 @@ const App: React.FC = () => {
 
       <main className="flex-1 pt-20">
         {appError ? (
-          <div className="max-w-2xl mx-auto px-6 py-32 text-center animate-in fade-in zoom-in duration-500">
-            <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
-              <div className="bg-red-50 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8">
-                <AlertTriangle className="w-10 h-10 text-red-500" />
+          <div className="max-w-md mx-auto px-6 py-32 text-center animate-in zoom-in">
+            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-2xl">
+              <div className="bg-red-50 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <AlertTriangle className="w-8 h-8 text-red-500" />
               </div>
-              <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase">{appError.title}</h2>
-              <p className="text-slate-500 font-medium mb-10 leading-relaxed">{appError.msg}</p>
+              <h2 className="text-3xl font-black mb-2 uppercase">{appError.title}</h2>
+              <p className="text-slate-500 text-sm mb-8">{appError.msg}</p>
               
-              {appError.isProduction && (
-                <div className="mb-10 p-6 bg-slate-50 rounded-[2.5rem] text-left border border-slate-100">
-                  <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-900 mb-4">
-                    <ListChecks className="w-4 h-4" /> Production Checklist
-                  </h4>
-                  <ul className="space-y-3 text-xs font-medium text-slate-500">
-                    <li className="flex gap-2">1. Open your Vercel/Hosting Dashboard.</li>
-                    <li className="flex gap-2">2. Navigate to <b>Settings &gt; Environment Variables</b>.</li>
-                    <li className="flex gap-2">3. Add <b>API_KEY</b> with your Gemini 3 API key.</li>
-                    <li className="flex gap-2">4. Trigger a <b>Redeploy</b> to bake in the new configuration.</li>
-                  </ul>
-                  <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" className="mt-4 inline-flex items-center gap-1 text-[10px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors">
-                    Get an API Key <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              )}
-
               <button 
                 onClick={handleAppAction}
-                className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl flex items-center justify-center gap-3"
+                className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3"
               >
-                {appError.isProduction ? <RefreshCw className="w-5 h-5" /> : <Key className="w-5 h-5" />} 
-                {appError.isProduction ? 'Check for Key & Reload' : 'Connect Neural Engine'}
+                {appError.action === 'sync' ? <Key className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
+                {appError.action === 'sync' ? 'Connect Engine' : 'Try Again'}
               </button>
             </div>
           </div>
