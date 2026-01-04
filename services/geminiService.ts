@@ -2,8 +2,7 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { UserAnalysis, PhotoStyle, GeneratedImage, ToolType } from "../types";
 
-// Error classes for robust API handling
-// Fixes missing exports in ToolsHub.tsx
+// Standardized Error Classes for the UI
 export class AuthError extends Error {
   isEntityNotFound: boolean = false;
   constructor(message: string, isEntityNotFound: boolean = false) {
@@ -27,10 +26,10 @@ export class QuotaExceededError extends Error {
   }
 }
 
-// Helper to call Gemini with robust error mapping
 async function callGemini<T>(fn: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
-  // Always create a new instance right before use to catch the latest API_KEY from context
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Use the pre-configured environment variable exclusively
+  const apiKey = process.env.API_KEY;
+  const ai = new GoogleGenAI({ apiKey: apiKey || '' });
   
   try {
     return await fn(ai);
@@ -38,19 +37,10 @@ async function callGemini<T>(fn: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
     const msg = error?.message || String(error);
     console.error("Neural Engine Error:", msg);
     
-    // Map common error strings to typed errors for UI handling as required by ToolsHub
-    if (msg.includes("429") || msg.toLowerCase().includes("quota")) {
-      throw new QuotaExceededError(msg);
-    }
-    if (msg.includes("Requested entity was not found")) {
-      throw new AuthError(msg, true);
-    }
-    if (msg.includes("401") || msg.includes("403") || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("api key")) {
-      throw new AuthError(msg);
-    }
-    if (msg.toLowerCase().includes("safety") || msg.toLowerCase().includes("blocked")) {
-      throw new SafetyError(msg);
-    }
+    if (msg.includes("429") || msg.toLowerCase().includes("quota")) throw new QuotaExceededError(msg);
+    if (msg.includes("Requested entity was not found")) throw new AuthError(msg, true);
+    if (msg.includes("401") || msg.includes("403")) throw new AuthError(msg);
+    if (msg.toLowerCase().includes("safety")) throw new SafetyError(msg);
     
     throw error;
   }
@@ -74,7 +64,7 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
       contents: {
         parts: [
           ...parts,
-          { text: "Analyze these photos for professional headshot suitability. Output JSON of characteristics." }
+          { text: "Analyze these photos for professional suitability. Output JSON." }
         ]
       },
       config: {
@@ -119,7 +109,7 @@ export const generateEnhancedPhoto = async (
 ): Promise<GeneratedImage> => {
   return callGemini(async (ai) => {
     const { mimeType, data } = parseDataUrl(referenceImage);
-    const prompt = `Professional ${style} portrait. Maintain bone structure: ${analysis.facialStructure}. High fidelity.`;
+    const prompt = `Professional ${style} portrait of the person. High fidelity. Maintain facial structure: ${analysis.facialStructure}.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -131,15 +121,14 @@ export const generateEnhancedPhoto = async (
       }
     });
 
-    // Iterate through all parts to find the image part as per guidelines
     const imgPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!imgPart?.inlineData) throw new Error("Generation failed.");
+    if (!imgPart?.inlineData) throw new Error("Synthesis failed.");
 
     return { 
       id: Math.random().toString(36).substr(2, 9), 
       url: `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`, 
       category: style, 
-      description: `Studio ${style} result.` 
+      description: `Studio-quality ${style} result.` 
     };
   });
 };
@@ -167,10 +156,10 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
     const { mimeType, data } = parseDataUrl(imageUrl);
     let prompt = "";
     switch (tool) {
-      case ToolType.WATERMARK_REMOVER: prompt = "Remove overlay. Restore background."; break;
+      case ToolType.WATERMARK_REMOVER: prompt = "Remove watermark."; break;
       case ToolType.UPSCALER: prompt = "Upscale 4x."; break;
       case ToolType.BG_REMOVER: prompt = "Remove background."; break;
-      case ToolType.RESIZER: prompt = `Resize to ${customParams.width}x${customParams.height}${customParams.unit}.`; break;
+      case ToolType.RESIZER: prompt = `Resize to ${customParams.width}x${customParams.height}.`; break;
     }
 
     const response = await ai.models.generateContent({
@@ -184,7 +173,7 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
     });
 
     const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!part?.inlineData) throw new Error("Neural processing failed.");
+    if (!part?.inlineData) throw new Error("Neural action failed.");
     return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
   });
 };
