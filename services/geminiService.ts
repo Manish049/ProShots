@@ -4,7 +4,7 @@ import { UserAnalysis, PhotoStyle, GeneratedImage, ToolType } from "../types";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper to get the most up-to-date API key exclusively from process.env.API_KEY
+// Helper to get the most up-to-date API key
 const getActiveApiKey = () => {
   return process.env.API_KEY;
 };
@@ -30,14 +30,13 @@ export class AuthError extends Error {
   }
 }
 
-// Create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
-async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = 3): Promise<T> {
+async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRetries = 2): Promise<T> {
   let lastError: any;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const apiKey = getActiveApiKey();
       if (!apiKey) {
-        throw new AuthError("Neural Engine offline. Handshake required.");
+        throw new AuthError("Neural Engine Link required.");
       }
       
       const ai = new GoogleGenAI({ apiKey });
@@ -46,7 +45,9 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
       lastError = error;
       const errorStr = typeof error === 'string' ? error : (error?.message || JSON.stringify(error));
       
-      // Handle Authentication / Project Issues including 'entity not found'
+      console.error(`[Neural Engine] Attempt ${attempt + 1} failed:`, errorStr);
+
+      // Handle Authentication / Project Issues
       if (
         errorStr.includes('401') || 
         errorStr.includes('403') || 
@@ -54,31 +55,27 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
         errorStr.includes('API key not valid') ||
         errorStr.includes('PERMISSION_DENIED')
       ) {
-        // Resetting the connection state is handled by the caller catching this AuthError
-        throw new AuthError("Auth Failed: Ensure your API Key is valid, billing is active on a paid project, and the Gemini API is enabled.");
+        // More descriptive error for users
+        let detail = "Ensure your API Key is valid and the Gemini API is enabled in your Google AI Studio project.";
+        if (errorStr.includes('Requested entity was not found')) {
+          detail = "The selected AI model is currently unavailable in your region or account tier. Try using a key from a paid project or wait for wider availability.";
+        }
+        throw new AuthError(`Handshake Failed: ${detail}`);
       }
 
       // Handle Safety Blocks
-      if (errorStr.includes('SAFETY') || errorStr.includes('blocked') || errorStr.includes('finishReason: SAFETY')) {
-        throw new SafetyError("The request was blocked by safety filters. Try a different image or description.");
+      if (errorStr.includes('SAFETY') || errorStr.includes('blocked')) {
+        throw new SafetyError("The neural firewall blocked this request due to safety filters.");
       }
 
       // Handle Quota
-      const isRateLimit = 
-        error?.status === 429 || 
-        error?.code === 429 || 
-        errorStr.includes('429') || 
-        errorStr.includes('RESOURCE_EXHAUSTED') ||
-        errorStr.includes('quota');
-
+      const isRateLimit = errorStr.includes('429') || errorStr.includes('RESOURCE_EXHAUSTED');
       if (isRateLimit) {
         if (attempt < maxRetries - 1) {
-          const waitTime = Math.pow(3, attempt) * 3000 + Math.random() * 2000;
-          await delay(waitTime);
+          await delay(2000 * (attempt + 1));
           continue;
-        } else {
-          throw new QuotaExceededError("API Quota exhausted. Please try again in a few minutes.");
         }
+        throw new QuotaExceededError("Free Tier Quota exhausted. Please wait 60 seconds.");
       }
       throw error;
     }
@@ -100,17 +97,14 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
     });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview', // Using flash for better free-tier availability
       contents: {
         parts: [
           ...parts,
-          { text: `Task: Conduct a deep anatomical audit for character synthesis. 
-          Analyze facial geometry, eye shape, and skin texture.
-          Output JSON.` }
+          { text: "Analyze these photos. Conduct a deep anatomical audit for character synthesis. Analyze facial geometry, eye shape, and skin texture. Output JSON." }
         ]
       },
       config: {
-        thinkingConfig: { thinkingBudget: 16000 },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -152,34 +146,14 @@ export const generateEnhancedPhoto = async (
   return callGeminiWithRetry(async (ai) => {
     const { mimeType, data } = parseDataUrl(referenceImage);
     
-    let stylePrompt = "";
+    let stylePrompt = `High-quality ${style} aesthetic. Professional photography.`;
     switch(style) {
-      case PhotoStyle.VACATION:
-        stylePrompt = "Professional travel photography, luxury resort background, golden hour lighting, cinematic bokeh.";
-        break;
-      case PhotoStyle.PROFESSIONAL:
-        stylePrompt = "High-end corporate studio headshot, professional business attire, sharp focus, neutral background.";
-        break;
-      case PhotoStyle.DATING:
-        stylePrompt = "Warm approachable lifestyle portrait, natural outdoor lighting, stylish casual wear.";
-        break;
-      case PhotoStyle.PARTY:
-        stylePrompt = "Vibrant night-out aesthetic, dynamic colorful lighting, sharp focus on subject.";
-        break;
-      case PhotoStyle.ANIMATION_2D:
-        stylePrompt = "Stylized 2D animated character concept art, clean vector lines, cel-shading.";
-        break;
-      case PhotoStyle.ANIMATION_3D:
-        stylePrompt = "Stylized 3D CGI character render, Pixar-esque aesthetics, expressive lighting.";
-        break;
-      default:
-        stylePrompt = `High-quality ${style} aesthetic.`;
+      case PhotoStyle.PROFESSIONAL: stylePrompt = "High-end corporate studio headshot, sharp focus, neutral background."; break;
+      case PhotoStyle.DATING: stylePrompt = "Warm approachable lifestyle portrait, natural outdoor lighting."; break;
+      case PhotoStyle.ANIMATION_3D: stylePrompt = "Stylized 3D CGI character render, Pixar-esque aesthetics."; break;
     }
 
-    const prompt = `Synthesize a ${style} portrait maintaining the identity from the source. 
-    Identity details: ${analysis.facialStructure}, ${analysis.eyeDetails}.
-    Required style: ${stylePrompt}.
-    Output ONLY the image part.`;
+    const prompt = `Synthesize a ${style} portrait maintaining the identity. Identity: ${analysis.facialStructure}, ${analysis.eyeDetails}. Style: ${stylePrompt}. Output image part.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -191,18 +165,14 @@ export const generateEnhancedPhoto = async (
       }
     });
 
-    let imageUrl = "";
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-    }
-
-    if (!imageUrl) throw new Error("No image was generated. The output might have been filtered.");
+    const imgPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+    if (!imgPart?.inlineData) throw new Error("Neural output failed or was filtered.");
 
     return { 
       id: Math.random().toString(36).substr(2, 9), 
-      url: imageUrl, 
+      url: `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`, 
       category: style, 
-      description: `Premium ${style} synthesis.` 
+      description: `Studio ${style} synthesis.` 
     };
   });
 };
@@ -215,7 +185,7 @@ export const editPhotoWithText = async (baseImageUrl: string, instruction: strin
       contents: {
         parts: [
           { inlineData: { data, mimeType } },
-          { text: `${instruction}. Generate the modified image only.` }
+          { text: `${instruction}. Generate modified image only.` }
         ]
       }
     });
@@ -229,20 +199,11 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
   return callGeminiWithRetry(async (ai) => {
     const { mimeType, data } = parseDataUrl(imageUrl);
     let prompt = "";
-
     switch (tool) {
-      case ToolType.WATERMARK_REMOVER:
-        prompt = `Perform high-fidelity surface restoration. Reconstruct textures in obscured regions using surrounding context. Output image only.`;
-        break;
-      case ToolType.UPSCALER:
-        prompt = "Enhance resolution and sharpen fine textures (pores, hair). Output image only.";
-        break;
-      case ToolType.BG_REMOVER:
-        prompt = "Remove background and isolate subject precisely. Output image only.";
-        break;
-      case ToolType.RESIZER:
-        prompt = `Refactor dimensions to ${customParams.width}${customParams.unit} x ${customParams.height}${customParams.unit}. Output image only.`;
-        break;
+      case ToolType.WATERMARK_REMOVER: prompt = "Restore image surface. Remove overlays. Output image only."; break;
+      case ToolType.UPSCALER: prompt = "Enhance resolution and micro-details. Output image only."; break;
+      case ToolType.BG_REMOVER: prompt = "Precisely isolate subject and remove background. Output image only."; break;
+      case ToolType.RESIZER: prompt = `Resize to ${customParams.width}x${customParams.height}${customParams.unit}. Output image only.`; break;
     }
 
     const response = await ai.models.generateContent({
@@ -256,7 +217,7 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
     });
 
     const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!part?.inlineData) throw new Error("Neural output blocked or failed.");
+    if (!part?.inlineData) throw new Error("Neural output blocked.");
     return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
   });
 };
