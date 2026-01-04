@@ -1,6 +1,7 @@
+
 import React, { useState, useRef } from 'react';
 import { ToolType } from '../types';
-import { Upload, Wand2, Maximize, Layers, Frame, X, Download, RefreshCw, AlertCircle, FileText, Printer, Monitor, Info, Sparkles, ShieldCheck, Zap, Clock, Key } from 'lucide-react';
+import { Upload, Wand2, Maximize, Layers, Frame, X, Download, RefreshCw, AlertCircle, FileText, Printer, Monitor, Info, Sparkles, ShieldCheck, Zap, Clock, Key, ExternalLink } from 'lucide-react';
 import { processToolAction, QuotaExceededError, AuthError, SafetyError } from '../services/geminiService';
 
 interface ToolPreset {
@@ -84,7 +85,7 @@ const ToolsHub: React.FC<{ initialTool?: ToolType }> = ({ initialTool = ToolType
     } catch (err: any) { 
       console.error("AI Tool Error:", err); 
       if (err instanceof AuthError) {
-        setToolError({ title: "Auth Failed", msg: "Invalid or restricted API Key. Select a valid key from a paid project.", action: 'select_key' });
+        setToolError({ title: "Auth Failed", msg: "Invalid or restricted API Key. Select a valid key from a paid project with Gemini API enabled.", action: 'select_key' });
       } else if (err instanceof SafetyError) {
         setToolError({ title: "Safety Block", msg: "The AI engine blocked this operation due to safety/copyright filters." });
       } else if (err instanceof QuotaExceededError) {
@@ -100,6 +101,8 @@ const ToolsHub: React.FC<{ initialTool?: ToolType }> = ({ initialTool = ToolType
   const handleToolAction = async () => {
     if (toolError?.action === 'select_key' && window.aistudio) {
       await window.aistudio.openSelectKey();
+      // Assume success and signal update
+      window.dispatchEvent(new CustomEvent('neural_sync_complete'));
       setToolError(null);
     }
   };
@@ -181,14 +184,26 @@ const ToolsHub: React.FC<{ initialTool?: ToolType }> = ({ initialTool = ToolType
                     <p className="text-xs text-slate-400 mt-2">{msg.sub}</p>
                   </div>
                 ) : toolError ? (
-                  <div className="text-center p-8 flex flex-col items-center">
-                    <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
-                    <p className="text-sm font-bold text-slate-900 mb-2">{toolError.title}</p>
-                    <p className="text-xs text-slate-400 mb-6">{toolError.msg}</p>
+                  <div className="text-center p-8 flex flex-col items-center max-w-sm">
+                    <div className="bg-red-50 p-4 rounded-full mb-6">
+                      <AlertCircle className="w-12 h-12 text-red-500" />
+                    </div>
+                    <p className="text-base font-black text-slate-900 mb-2 uppercase tracking-tight">{toolError.title}</p>
+                    <p className="text-xs text-slate-500 mb-6 leading-relaxed">{toolError.msg}</p>
                     {toolError.action === 'select_key' && (
-                      <button onClick={handleToolAction} className="bg-slate-900 text-white px-6 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
-                        <Key className="w-3 h-3" /> Select Key
-                      </button>
+                      <div className="space-y-4 w-full">
+                        <button onClick={handleToolAction} className="w-full bg-slate-900 text-white px-6 py-4 rounded-[2rem] text-xs font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95">
+                          <Key className="w-4 h-4" /> Select Valid Key
+                        </button>
+                        <a 
+                          href="https://ai.google.dev/gemini-api/docs/billing" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-bold text-slate-400 hover:text-slate-900 flex items-center justify-center gap-1 uppercase tracking-widest transition-colors"
+                        >
+                          Check Billing Status <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
                     )}
                   </div>
                 ) : (
