@@ -4,12 +4,31 @@ import { UserAnalysis, PhotoStyle, GeneratedImage, ToolType } from "../types";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Robustly retrieves the API key from the environment.
+ * Handles Vite static replacement, runtime platform injection, and standard Node-like environments.
+ */
 const getActiveApiKey = () => {
-  // Check for both the process.env and any globally injected keys
-  const key = process.env.API_KEY;
+  // First, check the standard process.env.API_KEY
+  // We use a try-catch and dynamic access to avoid issues with static optimizers
+  let key: any;
+  try {
+    key = process.env.API_KEY;
+  } catch (e) {
+    key = undefined;
+  }
+
+  // If the baked-in value is useless, check for runtime shims provided by the platform (e.g. window.process)
+  if (!key || key === 'undefined' || key === 'null' || key === '') {
+    const runtimeProcess = (globalThis as any).process || (window as any).process;
+    key = runtimeProcess?.env?.API_KEY;
+  }
+
+  // Final check for the string "undefined" which Vite often bakes in during build if the env var is missing
   if (!key || key === 'undefined' || key === 'null' || key === '') {
     return null;
   }
+  
   return key;
 };
 
@@ -41,6 +60,8 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const apiKey = getActiveApiKey();
+      
+      // If no key is found, and we are in a platform context, we should tell the user to select one.
       if (!apiKey) {
         throw new AuthError("Neural Engine Link missing. The API key is not configured in this environment.");
       }
@@ -54,7 +75,7 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
       console.error(`[Neural Engine] Attempt ${attempt + 1} failed:`, errorStr);
 
       if (errorStr.includes('Requested entity was not found')) {
-        throw new AuthError("Model Unavailable: This model ID is not enabled for your project.", true);
+        throw new AuthError("Model Unavailable: This model ID is not enabled for your project or region.", true);
       }
 
       if (
@@ -63,7 +84,7 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
         errorStr.includes('API key not valid') ||
         errorStr.includes('PERMISSION_DENIED')
       ) {
-        throw new AuthError("Auth Failed: The provided API key is invalid or lacks the required permissions for Gemini 3 models.");
+        throw new AuthError("Auth Failed: The API key is invalid or lacks permissions for Gemini 3 models.");
       }
 
       if (errorStr.includes('SAFETY') || errorStr.includes('blocked')) {
@@ -97,13 +118,12 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
       return { inlineData: { data, mimeType } };
     });
 
-    // Using gemini-3-flash-preview for maximum availability across all key types
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview', 
       contents: {
         parts: [
           ...parts,
-          { text: "Analyze these photos. Identify core facial characteristics for synthesis. Output JSON." }
+          { text: "Analyze these photos for facial and body characteristics. Output JSON." }
         ]
       },
       config: {
@@ -147,7 +167,7 @@ export const generateEnhancedPhoto = async (
 ): Promise<GeneratedImage> => {
   return callGeminiWithRetry(async (ai) => {
     const { mimeType, data } = parseDataUrl(referenceImage);
-    const prompt = `Generate a ${style} photo of this person. Features: ${analysis.facialStructure}, ${analysis.eyeDetails}. Output image.`;
+    const prompt = `A professional ${style} portrait of this person. Maintain facial structure: ${analysis.facialStructure}. High fidelity.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -160,13 +180,13 @@ export const generateEnhancedPhoto = async (
     });
 
     const imgPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!imgPart?.inlineData) throw new Error("Image synthesis failed.");
+    if (!imgPart?.inlineData) throw new Error("Synthesis failed.");
 
     return { 
       id: Math.random().toString(36).substr(2, 9), 
       url: `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`, 
       category: style, 
-      description: `Studio ${style} photo.` 
+      description: `Professional ${style} generation.` 
     };
   });
 };
@@ -179,12 +199,12 @@ export const editPhotoWithText = async (baseImageUrl: string, instruction: strin
       contents: {
         parts: [
           { inlineData: { data, mimeType } },
-          { text: `${instruction}. Generate modified image only.` }
+          { text: `${instruction}. Generate result as image.` }
         ]
       }
     });
     const b64 = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!b64?.inlineData) throw new Error("The edit failed.");
+    if (!b64?.inlineData) throw new Error("Edit failed.");
     return `data:${b64.inlineData.mimeType};base64,${b64.inlineData.data}`;
   });
 };
@@ -194,10 +214,10 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
     const { mimeType, data } = parseDataUrl(imageUrl);
     let prompt = "";
     switch (tool) {
-      case ToolType.WATERMARK_REMOVER: prompt = "Restore image surface. Remove overlays. Output image only."; break;
-      case ToolType.UPSCALER: prompt = "Enhance resolution and micro-details. Output image only."; break;
-      case ToolType.BG_REMOVER: prompt = "Precisely isolate subject and remove background. Output image only."; break;
-      case ToolType.RESIZER: prompt = `Resize to ${customParams.width}x${customParams.height}${customParams.unit}. Output image only.`; break;
+      case ToolType.WATERMARK_REMOVER: prompt = "Remove any visual overlays or text. Restore original surface."; break;
+      case ToolType.UPSCALER: prompt = "Increase resolution and clarity of the subject."; break;
+      case ToolType.BG_REMOVER: prompt = "Isolate the subject and remove the background completely."; break;
+      case ToolType.RESIZER: prompt = `Adjust to ${customParams.width}x${customParams.height}${customParams.unit}.`; break;
     }
 
     const response = await ai.models.generateContent({
@@ -211,7 +231,7 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
     });
 
     const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!part?.inlineData) throw new Error("Processing failed.");
+    if (!part?.inlineData) throw new Error("Neural processing failed.");
     return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
   });
 };

@@ -5,7 +5,9 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    'process.env.API_KEY': JSON.stringify(process.env.API_KEY)
+    // We define a fallback but allow for dynamic runtime access
+    // This ensures process.env is treated as an object in the browser
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY || 'undefined')
   },
   server: {
     port: 3000

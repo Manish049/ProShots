@@ -12,7 +12,6 @@ import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto, AuthError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-// Added missing RefreshCw icon import
 import { Zap, Key, ShieldCheck, PowerOff, AlertTriangle, ExternalLink, ListChecks, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -29,12 +28,20 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const checkKey = async () => {
+      // Check both baked-in and runtime-injected sources
       const envKey = process.env.API_KEY;
       const envKeyValid = envKey && envKey !== 'undefined' && envKey !== 'null' && envKey !== '';
+      
+      const runtimeProcess = (globalThis as any).process || (window as any).process;
+      const runtimeKey = runtimeProcess?.env?.API_KEY;
+      const runtimeKeyValid = runtimeKey && runtimeKey !== 'undefined' && runtimeKey !== 'null' && runtimeKey !== '';
+
       const platformKey = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
       
-      if (envKeyValid || platformKey) {
+      if (envKeyValid || runtimeKeyValid || platformKey) {
         setIsKeyConfigured(true);
+      } else {
+        setIsKeyConfigured(false);
       }
     };
 
@@ -42,15 +49,19 @@ const App: React.FC = () => {
 
     const handleSync = () => {
       setIsKeyConfigured(true);
-      showToast("Neural Link Active", 'success');
+      showToast("Neural Link Established", 'success');
       setAppError(null);
     };
 
     window.addEventListener('neural_sync_complete', handleSync);
     window.addEventListener('neural_disconnect', () => setIsKeyConfigured(false));
     
+    // Periodically re-check for injected keys from platform
+    const interval = setInterval(checkKey, 2000);
+    
     return () => {
       window.removeEventListener('neural_sync_complete', handleSync);
+      clearInterval(interval);
     };
   }, []);
 
@@ -66,7 +77,7 @@ const App: React.FC = () => {
         setAppError({
           title: "Neural Engine Offline",
           msg: isProd 
-            ? "Authentication missing in production environment." 
+            ? "Authentication missing in production environment. No API Key detected." 
             : "No API Key found. Establish a secure link to continue.",
           action: "open_config",
           isProduction: isProd
@@ -98,15 +109,15 @@ const App: React.FC = () => {
     } catch (error: any) {
       if (error instanceof AuthError) {
         setAppError({ 
-          title: "Auth Failed", 
+          title: "Authentication Failed", 
           msg: error.message, 
           action: "open_config",
           isProduction: !window.aistudio 
         });
       } else {
         setAppError({ 
-          title: "Neural Error", 
-          msg: "The AI engine encountered a processing fault. This often happens due to rate limits or invalid image content." 
+          title: "Neural Engine Error", 
+          msg: "The AI processing pipeline failed. Ensure your connection is stable and try again." 
         });
       }
       setStep(AppStep.LANDING);
@@ -118,12 +129,14 @@ const App: React.FC = () => {
       if (window.aistudio) {
         try {
           await window.aistudio.openSelectKey();
+          // Force set locally immediately to allow progress as per guidelines
+          setIsKeyConfigured(true);
           window.dispatchEvent(new CustomEvent('neural_sync_complete'));
         } catch (e) {
-          console.warn("Handshake failed");
+          console.warn("Handshake cancelled");
         }
       } else {
-        window.location.reload(); // Refresh to re-check env vars
+        window.location.reload(); 
       }
     }
     setAppError(null);
@@ -162,13 +175,13 @@ const App: React.FC = () => {
                     <ListChecks className="w-4 h-4" /> Production Checklist
                   </h4>
                   <ul className="space-y-3 text-xs font-medium text-slate-500">
-                    <li className="flex gap-2">1. Open your Vercel Project Dashboard.</li>
+                    <li className="flex gap-2">1. Open your Vercel/Hosting Dashboard.</li>
                     <li className="flex gap-2">2. Navigate to <b>Settings &gt; Environment Variables</b>.</li>
-                    <li className="flex gap-2">3. Add <b>API_KEY</b> with your Google AI Studio key.</li>
-                    <li className="flex gap-2">4. <b>Redeploy</b> your application to apply changes.</li>
+                    <li className="flex gap-2">3. Add <b>API_KEY</b> with your Gemini 3 API key.</li>
+                    <li className="flex gap-2">4. Trigger a <b>Redeploy</b> to bake in the new configuration.</li>
                   </ul>
-                  <a href="https://vercel.com/docs/concepts/projects/environment-variables" target="_blank" className="mt-4 inline-flex items-center gap-1 text-[10px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors">
-                    View Documentation <ExternalLink className="w-3 h-3" />
+                  <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" className="mt-4 inline-flex items-center gap-1 text-[10px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors">
+                    Get an API Key <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
               )}
@@ -178,7 +191,7 @@ const App: React.FC = () => {
                 className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl flex items-center justify-center gap-3"
               >
                 {appError.isProduction ? <RefreshCw className="w-5 h-5" /> : <Key className="w-5 h-5" />} 
-                {appError.isProduction ? 'Check for Key & Reload' : 'Re-sync Engine'}
+                {appError.isProduction ? 'Check for Key & Reload' : 'Connect Neural Engine'}
               </button>
             </div>
           </div>
