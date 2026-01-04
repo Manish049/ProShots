@@ -10,58 +10,27 @@ import ResultGallery from './components/ResultGallery';
 import ToolsHub from './components/ToolsHub';
 import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
-import { analyzePhotos, generateEnhancedPhoto, AuthError } from './services/geminiService';
+import { analyzePhotos, generateEnhancedPhoto } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Key, ShieldCheck, PowerOff, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ShieldCheck, PowerOff, AlertTriangle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
   const [activeTool, setActiveTool] = useState<ToolType>(ToolType.BG_REMOVER);
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [selectedStyle, setSelectedStyle] = useState<PhotoStyle | null>(null);
-  const [analysis, setAnalysis] = useState<UserAnalysis | null>(null);
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
-  const [appError, setAppError] = useState<{title: string, msg: string, action?: 'sync' | 'retry'} | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
-  const [isKeyConfigured, setIsKeyConfigured] = useState(false);
-
-  const checkConfig = async () => {
-    const envKey = process.env.API_KEY;
-    const hasEnv = !!(envKey && envKey !== 'undefined' && envKey !== 'null' && envKey !== '');
-    const hasPlatform = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
-    const isOk = hasEnv || hasPlatform;
-    setIsKeyConfigured(isOk);
-    return isOk;
-  };
-
-  useEffect(() => {
-    checkConfig();
-    const interval = setInterval(checkConfig, 2000);
-    return () => clearInterval(interval);
-  }, []);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const handleStepChange = async (newStep: AppStep, params?: any) => {
-    if ([AppStep.UPLOAD, AppStep.TOOLS].includes(newStep)) {
-      const ok = await checkConfig();
-      if (!ok) {
-        setAppError({
-          title: "Engine Offline",
-          msg: "Please connect your Gemini API Key to continue.",
-          action: 'sync'
-        });
-        return;
-      }
-    }
-    
+  const handleStepChange = (newStep: AppStep, params?: any) => {
     if (newStep === AppStep.TOOLS && params?.toolId) setActiveTool(params.toolId);
     setStep(newStep);
-    setAppError(null);
     if (!params?.targetId) window.scrollTo(0, 0);
   };
 
@@ -69,7 +38,6 @@ const App: React.FC = () => {
     try {
       setGenerationProgress({ current: 0, total: 25 });
       const profile = await analyzePhotos(photos.slice(0, 5));
-      setAnalysis(profile);
       
       const generated: GeneratedImage[] = [];
       for (let i = 0; i < 25; i++) {
@@ -80,27 +48,8 @@ const App: React.FC = () => {
       setResults(generated);
       setStep(AppStep.RESULTS);
     } catch (error: any) {
-      if (error instanceof AuthError || error.message?.includes('API_KEY_MISSING')) {
-        setAppError({ title: "Auth Required", msg: "Connect your Gemini API key to start processing.", action: 'sync' });
-      } else {
-        setAppError({ title: "Neural Fault", msg: error.message || "The AI engine encountered a processing error.", action: 'retry' });
-      }
+      showToast(error.message || "Neural Engine Error", 'error');
       setStep(AppStep.LANDING);
-    }
-  };
-
-  const handleAppAction = async () => {
-    if (appError?.action === 'sync') {
-      if (window.aistudio) {
-        await window.aistudio.openSelectKey();
-        setIsKeyConfigured(true);
-        setAppError(null);
-        showToast("Engine Connected", 'success');
-      } else {
-        window.location.reload();
-      }
-    } else {
-      setAppError(null);
     }
   };
 
@@ -120,60 +69,40 @@ const App: React.FC = () => {
       )}
 
       <main className="flex-1 pt-20">
-        {appError ? (
-          <div className="max-w-md mx-auto px-6 py-32 text-center animate-in zoom-in">
-            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-2xl">
-              <div className="bg-red-50 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <AlertTriangle className="w-8 h-8 text-red-500" />
-              </div>
-              <h2 className="text-3xl font-black mb-2 uppercase">{appError.title}</h2>
-              <p className="text-slate-500 text-sm mb-8">{appError.msg}</p>
-              
-              <button 
-                onClick={handleAppAction}
-                className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3"
-              >
-                {appError.action === 'sync' ? <Key className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
-                {appError.action === 'sync' ? 'Connect Engine' : 'Try Again'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          (() => {
-            switch (step) {
-              case AppStep.LANDING:
-                return (
-                  <>
-                    <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />
-                    <section id="success-stories" className="py-20 bg-white">
-                      <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-10">
-                        {TESTIMONIALS.map((t, i) => (
-                          <div key={i} className="bg-slate-50 p-6 rounded-[3rem] border border-slate-100">
-                            <img src={t.after} className="w-full aspect-square object-cover rounded-[2rem] mb-6" alt="Success" />
-                            <p className="text-slate-600 font-medium italic mb-4">"{t.content}"</p>
-                            <div className="flex items-center gap-4">
-                              <img src={t.avatar} className="w-10 h-10 rounded-full" alt={t.name} />
-                              <div>
-                                <h4 className="font-black text-sm">{t.name}</h4>
-                                <p className="text-[10px] text-slate-400 font-black uppercase">{t.role}</p>
-                              </div>
+        {(() => {
+          switch (step) {
+            case AppStep.LANDING:
+              return (
+                <>
+                  <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />
+                  <section id="success-stories" className="py-20 bg-white">
+                    <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-10">
+                      {TESTIMONIALS.map((t, i) => (
+                        <div key={i} className="bg-slate-50 p-6 rounded-[3rem] border border-slate-100">
+                          <img src={t.after} className="w-full aspect-square object-cover rounded-[2rem] mb-6" alt="Success" />
+                          <p className="text-slate-600 font-medium italic mb-4">"{t.content}"</p>
+                          <div className="flex items-center gap-4">
+                            <img src={t.avatar} className="w-10 h-10 rounded-full" alt={t.name} />
+                            <div>
+                              <h4 className="font-black text-sm">{t.name}</h4>
+                              <p className="text-[10px] text-slate-400 font-black uppercase">{t.role}</p>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </section>
-                  </>
-                );
-              case AppStep.UPLOAD: return <UploadSection onFilesSelected={(files) => { setUploadedPhotos(files); setStep(AppStep.STYLE_SELECT); }} />;
-              case AppStep.STYLE_SELECT: return <StyleSelector onStyleSelected={(style) => { setSelectedStyle(style); setStep(AppStep.PROCESSING); startAIProcessing(uploadedPhotos, style); }} />;
-              case AppStep.PROCESSING: return <ProcessingStatus progress={generationProgress} />;
-              case AppStep.RESULTS: return <ResultGallery images={results} onRestart={() => setStep(AppStep.LANDING)} />;
-              case AppStep.TOOLS: return <ToolsHub initialTool={activeTool} />;
-              case AppStep.FOUNDER: return <FounderPage />;
-              default: return <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />;
-            }
-          })()
-        )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </>
+              );
+            case AppStep.UPLOAD: return <UploadSection onFilesSelected={(files) => { setUploadedPhotos(files); setStep(AppStep.STYLE_SELECT); }} />;
+            case AppStep.STYLE_SELECT: return <StyleSelector onStyleSelected={(style) => { setSelectedStyle(style); setStep(AppStep.PROCESSING); startAIProcessing(uploadedPhotos, style); }} />;
+            case AppStep.PROCESSING: return <ProcessingStatus progress={generationProgress} />;
+            case AppStep.RESULTS: return <ResultGallery images={results} onRestart={() => setStep(AppStep.LANDING)} />;
+            case AppStep.TOOLS: return <ToolsHub initialTool={activeTool} />;
+            case AppStep.FOUNDER: return <FounderPage />;
+            default: return <Hero onStart={() => handleStepChange(AppStep.UPLOAD)} />;
+          }
+        })()}
       </main>
       <Footer />
     </div>

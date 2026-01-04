@@ -1,61 +1,57 @@
 
-// Fix AuthError definition and implement anatomical analysis with Gemini 3 Pro
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { UserAnalysis, PhotoStyle, GeneratedImage, ToolType } from "../types";
 
-const getActiveApiKey = () => {
-  // Guidelines state: API key must be obtained exclusively from process.env.API_KEY
-  const key = process.env.API_KEY;
-  if (!key || key === 'undefined' || key === 'null' || key === '') {
-    return null;
-  }
-  return key;
-};
-
-export class QuotaExceededError extends Error {
-  constructor(message: string) {
+// Error classes for robust API handling
+// Fixes missing exports in ToolsHub.tsx
+export class AuthError extends Error {
+  isEntityNotFound: boolean = false;
+  constructor(message: string, isEntityNotFound: boolean = false) {
     super(message);
-    this.name = "QuotaExceededError";
+    this.name = 'AuthError';
+    this.isEntityNotFound = isEntityNotFound;
   }
 }
 
 export class SafetyError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "SafetyError";
+    this.name = 'SafetyError';
   }
 }
 
-export class AuthError extends Error {
-  // Property to track model availability/auth issues specifically for "Requested entity was not found"
-  public isEntityNotFound: boolean = false;
-  
-  constructor(message: string, isEntityNotFound: boolean = false) {
+export class QuotaExceededError extends Error {
+  constructor(message: string) {
     super(message);
-    this.name = "AuthError";
-    this.isEntityNotFound = isEntityNotFound;
+    this.name = 'QuotaExceededError';
   }
 }
 
+// Helper to call Gemini with robust error mapping
 async function callGemini<T>(fn: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
-  const apiKey = getActiveApiKey();
-  if (!apiKey) {
-    throw new AuthError("API_KEY_MISSING");
-  }
+  // Always create a new instance right before use to catch the latest API_KEY from context
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Create a new instance right before making an API call to ensure it uses the most up-to-date API key
-  const ai = new GoogleGenAI({ apiKey: apiKey });
   try {
     return await fn(ai);
   } catch (error: any) {
     const msg = error?.message || String(error);
-    // Special handling for "Requested entity was not found" to trigger re-selection of key in UI
-    if (msg.includes('Requested entity was not found')) {
-      throw new AuthError("Requested entity was not found.", true);
+    console.error("Neural Engine Error:", msg);
+    
+    // Map common error strings to typed errors for UI handling as required by ToolsHub
+    if (msg.includes("429") || msg.toLowerCase().includes("quota")) {
+      throw new QuotaExceededError(msg);
     }
-    if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) throw new QuotaExceededError("Quota exceeded.");
-    if (msg.includes('SAFETY')) throw new SafetyError("Safety block.");
-    if (msg.includes('401') || msg.includes('403') || msg.includes('API key not valid')) throw new AuthError("Invalid API key.");
+    if (msg.includes("Requested entity was not found")) {
+      throw new AuthError(msg, true);
+    }
+    if (msg.includes("401") || msg.includes("403") || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("api key")) {
+      throw new AuthError(msg);
+    }
+    if (msg.toLowerCase().includes("safety") || msg.toLowerCase().includes("blocked")) {
+      throw new SafetyError(msg);
+    }
+    
     throw error;
   }
 }
@@ -73,18 +69,16 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
       return { inlineData: { data, mimeType } };
     });
 
-    // Upgraded to gemini-3-pro-preview for advanced reasoning on anatomical features as per complex task requirements
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview', 
       contents: {
         parts: [
           ...parts,
-          { text: "Analyze these photos for professional headshot suitability. Perform deep anatomical analysis of facial bone structure and skin tone. Output JSON of characteristics." }
+          { text: "Analyze these photos for professional headshot suitability. Output JSON of characteristics." }
         ]
       },
       config: {
-        // High thinking budget for precision mapping of facial features
-        thinkingConfig: { thinkingBudget: 32768 },
+        thinkingConfig: { thinkingBudget: 16000 },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -114,7 +108,6 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
         }
       }
     });
-    // Directly access text property from response
     return JSON.parse(response.text || "{}");
   });
 };
@@ -126,7 +119,7 @@ export const generateEnhancedPhoto = async (
 ): Promise<GeneratedImage> => {
   return callGemini(async (ai) => {
     const { mimeType, data } = parseDataUrl(referenceImage);
-    const prompt = `A professional ${style} portrait of the person in the image. High fidelity. Identity lock and anatomical accuracy is critical.`;
+    const prompt = `Professional ${style} portrait. Maintain bone structure: ${analysis.facialStructure}. High fidelity.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -138,6 +131,7 @@ export const generateEnhancedPhoto = async (
       }
     });
 
+    // Iterate through all parts to find the image part as per guidelines
     const imgPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
     if (!imgPart?.inlineData) throw new Error("Generation failed.");
 
@@ -145,7 +139,7 @@ export const generateEnhancedPhoto = async (
       id: Math.random().toString(36).substr(2, 9), 
       url: `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`, 
       category: style, 
-      description: `Studio-quality ${style} result.` 
+      description: `Studio ${style} result.` 
     };
   });
 };
@@ -173,9 +167,9 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
     const { mimeType, data } = parseDataUrl(imageUrl);
     let prompt = "";
     switch (tool) {
-      case ToolType.WATERMARK_REMOVER: prompt = "Remove watermark/text. Restore background."; break;
-      case ToolType.UPSCALER: prompt = "Upscale and sharpen."; break;
-      case ToolType.BG_REMOVER: prompt = "Remove background. Subject only."; break;
+      case ToolType.WATERMARK_REMOVER: prompt = "Remove overlay. Restore background."; break;
+      case ToolType.UPSCALER: prompt = "Upscale 4x."; break;
+      case ToolType.BG_REMOVER: prompt = "Remove background."; break;
       case ToolType.RESIZER: prompt = `Resize to ${customParams.width}x${customParams.height}${customParams.unit}.`; break;
     }
 
@@ -190,7 +184,7 @@ export const processToolAction = async (imageUrl: string, tool: ToolType, custom
     });
 
     const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!part?.inlineData) throw new Error("Processing failed.");
+    if (!part?.inlineData) throw new Error("Neural processing failed.");
     return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
   });
 };
