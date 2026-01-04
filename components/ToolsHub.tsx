@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { ToolType } from '../types';
-import { Upload, Wand2, Maximize, Layers, Frame, X, Download, RefreshCw, AlertCircle, FileText, Printer, Monitor, Info, Sparkles, ShieldCheck, Zap, Clock, Key, ExternalLink } from 'lucide-react';
+import { Upload, Wand2, Maximize, Layers, Frame, X, Download, RefreshCw, AlertCircle, FileText, Printer, Monitor, Info, Sparkles, ShieldCheck, Zap, Clock, Key, ExternalLink, HelpCircle } from 'lucide-react';
 import { processToolAction, QuotaExceededError, AuthError, SafetyError } from '../services/geminiService';
 
 interface ToolPreset {
@@ -51,7 +51,7 @@ const ToolsHub: React.FC<{ initialTool?: ToolType }> = ({ initialTool = ToolType
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [toolError, setToolError] = useState<{title: string, msg: string, action?: string} | null>(null);
+  const [toolError, setToolError] = useState<{title: string, msg: string, action?: string, suggestion?: string} | null>(null);
   
   const [resizerCategory, setResizerCategory] = useState<keyof typeof RESIZE_CATEGORIES>('identification');
   const [selectedPreset, setSelectedPreset] = useState<ToolPreset | null>(RESIZE_CATEGORIES.identification.presets[0]);
@@ -84,14 +84,41 @@ const ToolsHub: React.FC<{ initialTool?: ToolType }> = ({ initialTool = ToolType
       setResultImage(res);
     } catch (err: any) { 
       console.error("AI Tool Error:", err); 
+      
       if (err instanceof AuthError) {
-        setToolError({ title: "Auth Failed", msg: "Invalid or restricted API Key. Select a valid key from a paid project with Gemini API enabled.", action: 'select_key' });
+        if (err.isEntityNotFound) {
+          setToolError({ 
+            title: "Model Access Denied", 
+            msg: "The specific Gemini model requested is not currently available for your project or region.",
+            suggestion: "Try selecting a key from a paid project or wait for broader availability in your region.",
+            action: 'select_key' 
+          });
+        } else {
+          setToolError({ 
+            title: "Authentication Failed", 
+            msg: err.message, 
+            suggestion: "Ensure your API key is correct and has the Gemini API enabled in Google AI Studio.",
+            action: 'select_key' 
+          });
+        }
       } else if (err instanceof SafetyError) {
-        setToolError({ title: "Safety Block", msg: "The AI engine blocked this operation due to safety/copyright filters." });
+        setToolError({ 
+          title: "Safety Shield Triggered", 
+          msg: "The neural firewall blocked this image to comply with safety filters.",
+          suggestion: "Try an image with less complex backgrounds or clearer human features." 
+        });
       } else if (err instanceof QuotaExceededError) {
-        setToolError({ title: "Quota Exhausted", msg: "Too many requests. Please wait 60 seconds." });
+        setToolError({ 
+          title: "Rate Limit Exceeded", 
+          msg: "You've reached the request limit for the Free Tier.",
+          suggestion: "Please wait 60 seconds before trying again. For higher limits, consider a paid project key."
+        });
       } else {
-        setToolError({ title: "Neural Failure", msg: "The engine encountered an error. Please try a smaller or clearer image." });
+        setToolError({ 
+          title: "Neural Engine Fault", 
+          msg: "The processing pipeline encountered an unexpected interruption.",
+          suggestion: "Check your internet connection or try refreshing the page."
+        });
       }
     } finally { 
       setIsProcessing(false); 
@@ -100,10 +127,13 @@ const ToolsHub: React.FC<{ initialTool?: ToolType }> = ({ initialTool = ToolType
 
   const handleToolAction = async () => {
     if (toolError?.action === 'select_key' && window.aistudio) {
-      await window.aistudio.openSelectKey();
-      // Assume success and signal update
-      window.dispatchEvent(new CustomEvent('neural_sync_complete'));
-      setToolError(null);
+      try {
+        await window.aistudio.openSelectKey();
+        window.dispatchEvent(new CustomEvent('neural_sync_complete'));
+        setToolError(null);
+      } catch (e) {
+        console.warn("Key selection dialog cancelled.");
+      }
     }
   };
 
@@ -189,7 +219,17 @@ const ToolsHub: React.FC<{ initialTool?: ToolType }> = ({ initialTool = ToolType
                       <AlertCircle className="w-12 h-12 text-red-500" />
                     </div>
                     <p className="text-base font-black text-slate-900 mb-2 uppercase tracking-tight">{toolError.title}</p>
-                    <p className="text-xs text-slate-500 mb-6 leading-relaxed">{toolError.msg}</p>
+                    <p className="text-xs text-slate-500 mb-4 leading-relaxed">{toolError.msg}</p>
+                    
+                    {toolError.suggestion && (
+                      <div className="bg-slate-100 rounded-2xl p-4 mb-6 text-left border border-slate-200">
+                        <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">
+                          <HelpCircle className="w-3 h-3" /> Recommendation
+                        </div>
+                        <p className="text-[10px] font-medium text-slate-600 leading-normal">{toolError.suggestion}</p>
+                      </div>
+                    )}
+
                     {toolError.action === 'select_key' && (
                       <div className="space-y-4 w-full">
                         <button onClick={handleToolAction} className="w-full bg-slate-900 text-white px-6 py-4 rounded-[2rem] text-xs font-black uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95">

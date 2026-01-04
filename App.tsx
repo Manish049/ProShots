@@ -12,7 +12,8 @@ import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto, AuthError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Zap, Key, ShieldCheck, PowerOff, AlertTriangle } from 'lucide-react';
+// Added missing RefreshCw icon import
+import { Zap, Key, ShieldCheck, PowerOff, AlertTriangle, ExternalLink, ListChecks, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
@@ -22,21 +23,22 @@ const App: React.FC = () => {
   const [analysis, setAnalysis] = useState<UserAnalysis | null>(null);
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
-  const [appError, setAppError] = useState<{title: string, msg: string, action?: string, isWarning?: boolean} | null>(null);
+  const [appError, setAppError] = useState<{title: string, msg: string, action?: string, isProduction?: boolean} | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [isKeyConfigured, setIsKeyConfigured] = useState(false);
 
   useEffect(() => {
-    const discoverNeuralEngine = async () => {
-      const envKeyExists = process.env.API_KEY && process.env.API_KEY !== 'undefined' && process.env.API_KEY !== '';
-      const platformKeyExists = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
+    const checkKey = async () => {
+      const envKey = process.env.API_KEY;
+      const envKeyValid = envKey && envKey !== 'undefined' && envKey !== 'null' && envKey !== '';
+      const platformKey = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
       
-      if (envKeyExists || platformKeyExists) {
+      if (envKeyValid || platformKey) {
         setIsKeyConfigured(true);
       }
     };
 
-    discoverNeuralEngine();
+    checkKey();
 
     const handleSync = () => {
       setIsKeyConfigured(true);
@@ -44,19 +46,11 @@ const App: React.FC = () => {
       setAppError(null);
     };
 
-    const handleDisconnect = () => {
-      setIsKeyConfigured(false);
-      setAppError(null);
-      showToast("Link Terminated", 'error');
-      setStep(AppStep.LANDING);
-    };
-
     window.addEventListener('neural_sync_complete', handleSync);
-    window.addEventListener('neural_disconnect', handleDisconnect);
+    window.addEventListener('neural_disconnect', () => setIsKeyConfigured(false));
     
     return () => {
       window.removeEventListener('neural_sync_complete', handleSync);
-      window.removeEventListener('neural_disconnect', handleDisconnect);
     };
   }, []);
 
@@ -68,10 +62,14 @@ const App: React.FC = () => {
   const handleStepChange = async (newStep: AppStep, params?: any) => {
     if ([AppStep.UPLOAD, AppStep.TOOLS].includes(newStep)) {
       if (!isKeyConfigured) {
+        const isProd = window.location.hostname !== 'localhost' && !window.aistudio;
         setAppError({
-          title: "Sync Required",
-          msg: "The Neural Engine is offline. For production (Vercel), ensure API_KEY is set in environment variables. For development, establish a secure link below.",
-          action: "open_config"
+          title: "Neural Engine Offline",
+          msg: isProd 
+            ? "Authentication missing in production environment." 
+            : "No API Key found. Establish a secure link to continue.",
+          action: "open_config",
+          isProduction: isProd
         });
         return;
       }
@@ -99,20 +97,17 @@ const App: React.FC = () => {
       setStep(AppStep.RESULTS);
     } catch (error: any) {
       if (error instanceof AuthError) {
-        if (error.isEntityNotFound) {
-          // Reset key state if model not found
-          setIsKeyConfigured(false);
-          setAppError({ 
-            title: "Model Unavailable", 
-            msg: "The specific Gemini model is not enabled for your project or region. Please select a different API Key or project.", 
-            action: "open_config",
-            isWarning: true
-          });
-        } else {
-          setAppError({ title: "Auth Failed", msg: error.message, action: "open_config" });
-        }
+        setAppError({ 
+          title: "Auth Failed", 
+          msg: error.message, 
+          action: "open_config",
+          isProduction: !window.aistudio 
+        });
       } else {
-        setAppError({ title: "Neural Error", msg: "The engine encountered an issue. Check your connection or try a different image." });
+        setAppError({ 
+          title: "Neural Error", 
+          msg: "The AI engine encountered a processing fault. This often happens due to rate limits or invalid image content." 
+        });
       }
       setStep(AppStep.LANDING);
     }
@@ -120,16 +115,15 @@ const App: React.FC = () => {
 
   const handleAppAction = async () => {
     if (appError?.action === 'open_config') {
-      if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+      if (window.aistudio) {
         try {
           await window.aistudio.openSelectKey();
           window.dispatchEvent(new CustomEvent('neural_sync_complete'));
         } catch (e) {
-          console.warn("Handshake failed:", e);
+          console.warn("Handshake failed");
         }
       } else {
-        // For non-platform web, provide clear feedback
-        showToast("Manually set API_KEY in Vercel settings", 'error');
+        window.location.reload(); // Refresh to re-check env vars
       }
     }
     setAppError(null);
@@ -154,18 +148,37 @@ const App: React.FC = () => {
 
       <main className="flex-1 pt-20">
         {appError ? (
-          <div className="max-w-xl mx-auto px-6 py-32 text-center animate-in fade-in zoom-in duration-500">
+          <div className="max-w-2xl mx-auto px-6 py-32 text-center animate-in fade-in zoom-in duration-500">
             <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
-              <div className={`${appError.isWarning ? 'bg-amber-50' : 'bg-red-50'} w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8`}>
-                {appError.isWarning ? <AlertTriangle className="w-10 h-10 text-amber-500" /> : <Zap className="w-10 h-10 text-red-500" />}
+              <div className="bg-red-50 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8">
+                <AlertTriangle className="w-10 h-10 text-red-500" />
               </div>
               <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase">{appError.title}</h2>
-              <p className="text-slate-500 font-medium mb-10">{appError.msg}</p>
+              <p className="text-slate-500 font-medium mb-10 leading-relaxed">{appError.msg}</p>
+              
+              {appError.isProduction && (
+                <div className="mb-10 p-6 bg-slate-50 rounded-[2.5rem] text-left border border-slate-100">
+                  <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-900 mb-4">
+                    <ListChecks className="w-4 h-4" /> Production Checklist
+                  </h4>
+                  <ul className="space-y-3 text-xs font-medium text-slate-500">
+                    <li className="flex gap-2">1. Open your Vercel Project Dashboard.</li>
+                    <li className="flex gap-2">2. Navigate to <b>Settings &gt; Environment Variables</b>.</li>
+                    <li className="flex gap-2">3. Add <b>API_KEY</b> with your Google AI Studio key.</li>
+                    <li className="flex gap-2">4. <b>Redeploy</b> your application to apply changes.</li>
+                  </ul>
+                  <a href="https://vercel.com/docs/concepts/projects/environment-variables" target="_blank" className="mt-4 inline-flex items-center gap-1 text-[10px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors">
+                    View Documentation <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )}
+
               <button 
                 onClick={handleAppAction}
                 className="w-full bg-slate-900 text-white px-10 py-5 rounded-[2rem] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-2xl flex items-center justify-center gap-3"
               >
-                <Key className="w-5 h-5" /> Re-sync Engine
+                {appError.isProduction ? <RefreshCw className="w-5 h-5" /> : <Key className="w-5 h-5" />} 
+                {appError.isProduction ? 'Check for Key & Reload' : 'Re-sync Engine'}
               </button>
             </div>
           </div>
