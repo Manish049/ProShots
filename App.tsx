@@ -12,7 +12,7 @@ import FounderPage from './components/FounderPage';
 import { AppStep, PhotoStyle, GeneratedImage, UserAnalysis, ToolType } from './types';
 import { analyzePhotos, generateEnhancedPhoto, AuthError } from './services/geminiService';
 import { TESTIMONIALS } from './constants';
-import { Zap, Key, ShieldCheck, PowerOff } from 'lucide-react';
+import { Zap, Key, ShieldCheck, PowerOff, AlertTriangle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.LANDING);
@@ -22,14 +22,11 @@ const App: React.FC = () => {
   const [analysis, setAnalysis] = useState<UserAnalysis | null>(null);
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 25 });
-  const [appError, setAppError] = useState<{title: string, msg: string, action?: string} | null>(null);
+  const [appError, setAppError] = useState<{title: string, msg: string, action?: string, isWarning?: boolean} | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
-
-  // isKeyConfigured state
   const [isKeyConfigured, setIsKeyConfigured] = useState(false);
 
   useEffect(() => {
-    // 1. Auto-discover connection status on mount
     const discoverNeuralEngine = async () => {
       const envKeyExists = process.env.API_KEY && process.env.API_KEY !== 'undefined' && process.env.API_KEY !== '';
       const platformKeyExists = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
@@ -41,7 +38,6 @@ const App: React.FC = () => {
 
     discoverNeuralEngine();
 
-    // 2. Event Listeners for Dynamic Sync
     const handleSync = () => {
       setIsKeyConfigured(true);
       showToast("Neural Link Active", 'success');
@@ -50,14 +46,9 @@ const App: React.FC = () => {
 
     const handleDisconnect = () => {
       setIsKeyConfigured(false);
-      setAnalysis(null);
-      setResults([]);
-      setUploadedPhotos([]);
-      setSelectedStyle(null);
       setAppError(null);
-      showToast("Link Terminated & Purged", 'error');
+      showToast("Link Terminated", 'error');
       setStep(AppStep.LANDING);
-      window.scrollTo(0, 0);
     };
 
     window.addEventListener('neural_sync_complete', handleSync);
@@ -79,7 +70,7 @@ const App: React.FC = () => {
       if (!isKeyConfigured) {
         setAppError({
           title: "Sync Required",
-          msg: "Neural Engine link is offline. Use the 'Sync Engine' protocol to re-establish access for this session.",
+          msg: "The Neural Engine is offline. For production (Vercel), ensure API_KEY is set in environment variables. For development, establish a secure link below.",
           action: "open_config"
         });
         return;
@@ -100,7 +91,6 @@ const App: React.FC = () => {
       
       const generated: GeneratedImage[] = [];
       for (let i = 0; i < 25; i++) {
-        if (!isKeyConfigured) throw new AuthError("Session Terminated");
         const img = await generateEnhancedPhoto(profile, style, photos[i % photos.length]);
         generated.push(img);
         setGenerationProgress({ current: i + 1, total: 25 });
@@ -109,9 +99,20 @@ const App: React.FC = () => {
       setStep(AppStep.RESULTS);
     } catch (error: any) {
       if (error instanceof AuthError) {
-        setAppError({ title: "Link Severed", msg: "The session link was removed. Re-sync to continue.", action: "open_config" });
+        if (error.isEntityNotFound) {
+          // Reset key state if model not found
+          setIsKeyConfigured(false);
+          setAppError({ 
+            title: "Model Unavailable", 
+            msg: "The specific Gemini model is not enabled for your project or region. Please select a different API Key or project.", 
+            action: "open_config",
+            isWarning: true
+          });
+        } else {
+          setAppError({ title: "Auth Failed", msg: error.message, action: "open_config" });
+        }
       } else {
-        setAppError({ title: "Engine Error", msg: "Processing failed. Restart the neural link." });
+        setAppError({ title: "Neural Error", msg: "The engine encountered an issue. Check your connection or try a different image." });
       }
       setStep(AppStep.LANDING);
     }
@@ -119,20 +120,19 @@ const App: React.FC = () => {
 
   const handleAppAction = async () => {
     if (appError?.action === 'open_config') {
-      // Robust Recovery: Attempt to trigger the platform sync directly
       if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
         try {
           await window.aistudio.openSelectKey();
+          window.dispatchEvent(new CustomEvent('neural_sync_complete'));
         } catch (e) {
-          console.warn("Handshake attempt from error state failed:", e);
+          console.warn("Handshake failed:", e);
         }
+      } else {
+        // For non-platform web, provide clear feedback
+        showToast("Manually set API_KEY in Vercel settings", 'error');
       }
-      // Fire event to notify all components to check state
-      window.dispatchEvent(new CustomEvent('neural_sync_complete'));
-      setAppError(null);
-    } else {
-      setAppError(null);
     }
+    setAppError(null);
   };
 
   return (
@@ -156,8 +156,8 @@ const App: React.FC = () => {
         {appError ? (
           <div className="max-w-xl mx-auto px-6 py-32 text-center animate-in fade-in zoom-in duration-500">
             <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-2xl relative overflow-hidden">
-              <div className="bg-amber-50 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8">
-                <Zap className="w-10 h-10 text-amber-500 fill-amber-500" />
+              <div className={`${appError.isWarning ? 'bg-amber-50' : 'bg-red-50'} w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-8`}>
+                {appError.isWarning ? <AlertTriangle className="w-10 h-10 text-amber-500" /> : <Zap className="w-10 h-10 text-red-500" />}
               </div>
               <h2 className="text-4xl font-black mb-4 tracking-tighter uppercase">{appError.title}</h2>
               <p className="text-slate-500 font-medium mb-10">{appError.msg}</p>

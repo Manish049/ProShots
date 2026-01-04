@@ -4,7 +4,6 @@ import { UserAnalysis, PhotoStyle, GeneratedImage, ToolType } from "../types";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper to get the most up-to-date API key
 const getActiveApiKey = () => {
   return process.env.API_KEY;
 };
@@ -24,9 +23,11 @@ export class SafetyError extends Error {
 }
 
 export class AuthError extends Error {
-  constructor(message: string) {
+  public isEntityNotFound: boolean = false;
+  constructor(message: string, isEntityNotFound = false) {
     super(message);
     this.name = "AuthError";
+    this.isEntityNotFound = isEntityNotFound;
   }
 }
 
@@ -35,8 +36,8 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const apiKey = getActiveApiKey();
-      if (!apiKey) {
-        throw new AuthError("Neural Engine Link required.");
+      if (!apiKey || apiKey === 'undefined' || apiKey === '') {
+        throw new AuthError("Neural Engine Link required. Please sync your API key.");
       }
       
       const ai = new GoogleGenAI({ apiKey });
@@ -47,20 +48,20 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
       
       console.error(`[Neural Engine] Attempt ${attempt + 1} failed:`, errorStr);
 
-      // Handle Authentication / Project Issues
+      // Handle specific 'Requested entity was not found' error
+      if (errorStr.includes('Requested entity was not found')) {
+        // This usually means the specific model isn't enabled for this project/region
+        throw new AuthError("Model Unavailable: The selected AI model is not enabled for this API key. Try a different project or check your AI Studio settings.", true);
+      }
+
+      // Handle other Auth/Permission issues
       if (
         errorStr.includes('401') || 
         errorStr.includes('403') || 
-        errorStr.includes('Requested entity was not found') ||
         errorStr.includes('API key not valid') ||
         errorStr.includes('PERMISSION_DENIED')
       ) {
-        // More descriptive error for users
-        let detail = "Ensure your API Key is valid and the Gemini API is enabled in your Google AI Studio project.";
-        if (errorStr.includes('Requested entity was not found')) {
-          detail = "The selected AI model is currently unavailable in your region or account tier. Try using a key from a paid project or wait for wider availability.";
-        }
-        throw new AuthError(`Handshake Failed: ${detail}`);
+        throw new AuthError("Auth Failed: Your API key is invalid or restricted. Ensure billing is enabled (for paid models) or the Gemini API is active in AI Studio.");
       }
 
       // Handle Safety Blocks
@@ -68,14 +69,14 @@ async function callGeminiWithRetry<T>(fn: (ai: GoogleGenAI) => Promise<T>, maxRe
         throw new SafetyError("The neural firewall blocked this request due to safety filters.");
       }
 
-      // Handle Quota
+      // Handle Quota (Rate Limits)
       const isRateLimit = errorStr.includes('429') || errorStr.includes('RESOURCE_EXHAUSTED');
       if (isRateLimit) {
         if (attempt < maxRetries - 1) {
-          await delay(2000 * (attempt + 1));
+          await delay(3000 * (attempt + 1));
           continue;
         }
-        throw new QuotaExceededError("Free Tier Quota exhausted. Please wait 60 seconds.");
+        throw new QuotaExceededError("Quota exhausted. Free tier keys have strict rate limits. Please wait 60 seconds.");
       }
       throw error;
     }
@@ -97,11 +98,11 @@ export const analyzePhotos = async (images: string[]): Promise<UserAnalysis> => 
     });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', // Using flash for better free-tier availability
+      model: 'gemini-3-flash-preview', 
       contents: {
         parts: [
           ...parts,
-          { text: "Analyze these photos. Conduct a deep anatomical audit for character synthesis. Analyze facial geometry, eye shape, and skin texture. Output JSON." }
+          { text: "Analyze these photos. Conduct a deep anatomical audit for character synthesis. Output JSON." }
         ]
       },
       config: {
@@ -145,15 +146,7 @@ export const generateEnhancedPhoto = async (
 ): Promise<GeneratedImage> => {
   return callGeminiWithRetry(async (ai) => {
     const { mimeType, data } = parseDataUrl(referenceImage);
-    
-    let stylePrompt = `High-quality ${style} aesthetic. Professional photography.`;
-    switch(style) {
-      case PhotoStyle.PROFESSIONAL: stylePrompt = "High-end corporate studio headshot, sharp focus, neutral background."; break;
-      case PhotoStyle.DATING: stylePrompt = "Warm approachable lifestyle portrait, natural outdoor lighting."; break;
-      case PhotoStyle.ANIMATION_3D: stylePrompt = "Stylized 3D CGI character render, Pixar-esque aesthetics."; break;
-    }
-
-    const prompt = `Synthesize a ${style} portrait maintaining the identity. Identity: ${analysis.facialStructure}, ${analysis.eyeDetails}. Style: ${stylePrompt}. Output image part.`;
+    const prompt = `Synthesize a ${style} portrait maintaining identity. Identity: ${analysis.facialStructure}, ${analysis.eyeDetails}. Output image only.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
@@ -166,7 +159,7 @@ export const generateEnhancedPhoto = async (
     });
 
     const imgPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!imgPart?.inlineData) throw new Error("Neural output failed or was filtered.");
+    if (!imgPart?.inlineData) throw new Error("Neural output failed.");
 
     return { 
       id: Math.random().toString(36).substr(2, 9), 
@@ -190,7 +183,7 @@ export const editPhotoWithText = async (baseImageUrl: string, instruction: strin
       }
     });
     const b64 = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (!b64?.inlineData) throw new Error("The edit failed or was blocked.");
+    if (!b64?.inlineData) throw new Error("The edit failed.");
     return `data:${b64.inlineData.mimeType};base64,${b64.inlineData.data}`;
   });
 };
