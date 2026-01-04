@@ -14,8 +14,17 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   const [isSynced, setIsSynced] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Connection is strictly non-persistent. Reset on mount.
   useEffect(() => {
+    // Check initial connection status
+    const checkStatus = async () => {
+      const hasEnvKey = process.env.API_KEY && process.env.API_KEY !== 'undefined' && process.env.API_KEY !== '';
+      const hasPlatformKey = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
+      if (hasEnvKey || hasPlatformKey) {
+        setIsSynced(true);
+      }
+    };
+    checkStatus();
+
     const handleSyncComplete = () => setIsSynced(true);
     const handleDisconnect = () => setIsSynced(false);
 
@@ -39,9 +48,9 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
   };
 
   const executeHandshake = async () => {
-    // Attempt to open the key selection dialog if the platform helper exists
     if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
       try {
+        // Attempt platform selection
         window.aistudio.openSelectKey().catch(e => {
           console.warn("Platform key selection dialog closed or failed:", e);
         });
@@ -50,10 +59,8 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
       }
     }
 
-    // CRITICAL FIX FOR VERCEL: 
-    // We signal immediate sync completion to activate the engine UI.
-    // If window.aistudio was missing, we assume the API key is provided via Vercel env variables.
-    // This prevents the "Handshake helper not found" block.
+    // Force sync completion regardless of platform dialog outcome
+    // to allow Vercel environment variables to function as a fallback.
     window.dispatchEvent(new CustomEvent('neural_sync_complete'));
   };
 
@@ -98,7 +105,6 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
             <span className="text-2xl font-black tracking-tighter">ProShots</span>
           </div>
           
-          {/* Desktop Menu */}
           <div className="hidden md:flex items-center gap-8">
             <div className="flex items-center gap-6 text-sm font-bold text-slate-500 uppercase tracking-widest">
               <button onClick={() => scrollToSection('how-it-works')} className="hover:text-slate-900 transition-colors">How it works</button>
@@ -154,11 +160,9 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
           </button>
         </div>
 
-        {/* Improved Mobile Menu Drawer */}
         {isMobileMenuOpen && (
           <div className="md:hidden absolute top-20 left-0 right-0 bg-white border-b border-slate-100 shadow-2xl animate-in slide-in-from-top duration-300 overflow-y-auto max-h-[calc(100vh-80px)]">
             <div className="p-6 flex flex-col gap-1">
-              {/* Primary Links */}
               <button onClick={() => scrollToSection('how-it-works')} className="w-full text-left py-4 px-4 hover:bg-slate-50 rounded-2xl font-black text-sm uppercase tracking-widest text-slate-900">How it works</button>
               <button onClick={() => handleMobileNav(AppStep.FOUNDER)} className="w-full text-left py-4 px-4 hover:bg-slate-50 rounded-2xl font-black text-sm uppercase tracking-widest text-slate-900 flex items-center gap-3">
                 <User className="w-4 h-4" /> Architect
@@ -166,7 +170,6 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
               
               <div className="my-4 h-px bg-slate-100" />
               
-              {/* Tools Section */}
               <div className="px-4 mb-2">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Neural Tools</span>
               </div>
@@ -181,7 +184,6 @@ const Navbar: React.FC<NavbarProps> = ({ onStepChange, currentStep }) => {
 
               <div className="my-4 h-px bg-slate-100" />
 
-              {/* Action Buttons */}
               <div className="space-y-3 pt-2">
                 <button 
                   onClick={() => { handleSyncInitiate(); setIsMobileMenuOpen(false); }} 

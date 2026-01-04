@@ -25,10 +25,23 @@ const App: React.FC = () => {
   const [appError, setAppError] = useState<{title: string, msg: string, action?: string} | null>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  // CRITICAL: isKeyConfigured is reset to FALSE on every mount (rebuild/refresh)
+  // isKeyConfigured state
   const [isKeyConfigured, setIsKeyConfigured] = useState(false);
 
   useEffect(() => {
+    // 1. Auto-discover connection status on mount
+    const discoverNeuralEngine = async () => {
+      const envKeyExists = process.env.API_KEY && process.env.API_KEY !== 'undefined' && process.env.API_KEY !== '';
+      const platformKeyExists = window.aistudio ? await window.aistudio.hasSelectedApiKey() : false;
+      
+      if (envKeyExists || platformKeyExists) {
+        setIsKeyConfigured(true);
+      }
+    };
+
+    discoverNeuralEngine();
+
+    // 2. Event Listeners for Dynamic Sync
     const handleSync = () => {
       setIsKeyConfigured(true);
       showToast("Neural Link Active", 'success');
@@ -36,17 +49,12 @@ const App: React.FC = () => {
     };
 
     const handleDisconnect = () => {
-      // 1. Terminate Session Configuration
       setIsKeyConfigured(false);
-      
-      // 2. HARD PURGE: Clear all session-specific memory
       setAnalysis(null);
       setResults([]);
       setUploadedPhotos([]);
       setSelectedStyle(null);
       setAppError(null);
-      
-      // 3. UI RESET
       showToast("Link Terminated & Purged", 'error');
       setStep(AppStep.LANDING);
       window.scrollTo(0, 0);
@@ -67,7 +75,6 @@ const App: React.FC = () => {
   };
 
   const handleStepChange = async (newStep: AppStep, params?: any) => {
-    // Session Verification barrier
     if ([AppStep.UPLOAD, AppStep.TOOLS].includes(newStep)) {
       if (!isKeyConfigured) {
         setAppError({
@@ -93,7 +100,6 @@ const App: React.FC = () => {
       
       const generated: GeneratedImage[] = [];
       for (let i = 0; i < 25; i++) {
-        // Continuous verification of engine link status
         if (!isKeyConfigured) throw new AuthError("Session Terminated");
         const img = await generateEnhancedPhoto(profile, style, photos[i % photos.length]);
         generated.push(img);
@@ -111,11 +117,19 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAppAction = () => {
+  const handleAppAction = async () => {
     if (appError?.action === 'open_config') {
-      // Directs user to the Navbar sync button behavior
+      // Robust Recovery: Attempt to trigger the platform sync directly
+      if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+        try {
+          await window.aistudio.openSelectKey();
+        } catch (e) {
+          console.warn("Handshake attempt from error state failed:", e);
+        }
+      }
+      // Fire event to notify all components to check state
+      window.dispatchEvent(new CustomEvent('neural_sync_complete'));
       setAppError(null);
-      showToast("Use the Sync Engine button in the navbar", 'success');
     } else {
       setAppError(null);
     }
