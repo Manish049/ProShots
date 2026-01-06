@@ -1,7 +1,9 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { GeneratedImage, PhotoStyle, ToolType } from '../types';
-import { Download, Sparkles, Wand2, X, RefreshCw, Layers, Sliders, RotateCcw } from 'lucide-react';
+import { Download, Sparkles, Wand2, X, RefreshCw, Layers, Sliders, RotateCcw, Package } from 'lucide-react';
 import { editPhotoWithText, processToolAction } from '../services/geminiService';
+import JSZip from 'jszip';
 
 interface ResultGalleryProps {
   images: GeneratedImage[];
@@ -11,6 +13,7 @@ interface ResultGalleryProps {
 const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onRestart }) => {
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [editPrompt, setEditPrompt] = useState("");
   const [editingImage, setEditingImage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<PhotoStyle>(PhotoStyle.PROFESSIONAL);
@@ -65,6 +68,40 @@ const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onRestart }) => {
     }
   };
 
+  const handleDownloadAll = async () => {
+    if (images.length === 0) return;
+    setIsDownloadingAll(true);
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder("ProShots-Portraits");
+      
+      const promises = images.map(async (img, index) => {
+        // Fetch the data URL as a blob
+        const response = await fetch(img.url);
+        const blob = await response.blob();
+        // Determine file extension from mime type or default to png
+        const extension = blob.type.split('/')[1] || 'png';
+        const fileName = `${img.category.replace(/\s+/g, '-').toLowerCase()}-${index + 1}.${extension}`;
+        folder?.file(fileName, blob);
+      });
+
+      await Promise.all(promises);
+      
+      const content = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `ProShots-Full-Collection-${Date.now()}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    } catch (error) {
+      console.error("Failed to generate zip", error);
+    } finally {
+      setIsDownloadingAll(false);
+    }
+  };
+
   const resetAdjustments = () => {
     setBrightness(100);
     setContrast(100);
@@ -92,12 +129,26 @@ const ResultGallery: React.FC<ResultGalleryProps> = ({ images, onRestart }) => {
           <h2 className="text-4xl font-bold mb-2">Your Enhanced Gallery</h2>
           <p className="text-slate-500">{images.length} studio-quality variations ready for use.</p>
         </div>
-        <button 
-          onClick={onRestart}
-          className="flex items-center gap-2 text-slate-600 hover:text-slate-900 font-medium transition-colors"
-        >
-          <RefreshCw className="w-5 h-5" /> Start Over
-        </button>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={handleDownloadAll}
+            disabled={isDownloadingAll || images.length === 0}
+            className="flex items-center gap-2 bg-slate-900 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 disabled:opacity-50 disabled:cursor-not-allowed group"
+          >
+            {isDownloadingAll ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Package className="w-4 h-4 group-hover:scale-110 transition-transform" />
+            )}
+            {isDownloadingAll ? 'Creating Zip...' : 'Download All (.zip)'}
+          </button>
+          <button 
+            onClick={onRestart}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-all"
+          >
+            <RotateCcw className="w-4 h-4" /> Start Over
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit mb-12 overflow-x-auto max-w-full no-scrollbar">
